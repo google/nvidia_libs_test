@@ -1,0 +1,134 @@
+# This file contains custom test configs, in addition to the ones generated in
+# the source code.
+
+# This TRUE_HALF_CONFIG in NHWC format is not supported according to the
+# documentation, but the failure mode when trying to run IMPLICIT_PRECOMP_GEMM
+# (after successfully calling GetWorkspaceSize) is unexpected:
+#
+# cuDNN 6.0.21 fails to run the convolution with STATUS_INTERNAL_ERROR.
+#
+# cuDNN 7.0.5 fails to run the convolution with STATUS_NOT_SUPPORTED or
+# STATUS_ARCH_MISMATCH.
+convolution_test {
+  reference {
+    input {
+      dimension: 1
+      dimension: 1
+      dimension: 128
+      dimension: 128
+      format: TENSOR_NHWC
+      data_type: DATA_HALF
+    }
+    filter {
+      dimension: 1
+      dimension: 1
+      dimension: 3
+      dimension: 3
+      format: TENSOR_NHWC
+      data_type: DATA_HALF
+    }
+    convolution {
+      pad: 1
+      pad: 1
+      compute_mode: DATA_HALF
+    }
+    fwd_algo: CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM
+    label: "NHWC_TRUE_HALF_CONFIG_Unsupported"
+  }
+}
+
+# This FLOAT_CONFIG in NHWC format fails with STATUS_INTERNAL_ERROR on cuDNN
+# 6.0.21. Fixed in cuDNN 7.
+convolution_test {
+  reference {
+    input {
+      dimension: 1
+      dimension: 16
+      dimension: 81
+      dimension: 47
+      data_type: DATA_FLOAT
+      format: TENSOR_NHWC
+    }
+    filter {
+      dimension: 1
+      dimension: 16
+      dimension: 8
+      dimension: 11
+      data_type: DATA_FLOAT
+      format: TENSOR_NHWC
+    }
+    convolution {
+      pad: 4
+      pad: 5
+      compute_mode: DATA_FLOAT
+    }
+    fwd_algo: CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM
+    label: "NHWC_FLOAT_CONFIG_InternalError"
+  }
+}
+
+# This PSEUDO_HALF_CONFIG in NHWC format crashes in GetWorkspaceSize on cuDNN
+# 6.0.21. Fixed in cuDNN 7.
+convolution_test {
+  reference {
+    input {
+      dimension: 1
+      dimension: 1
+      dimension: 128
+      dimension: 128
+      format: TENSOR_NHWC
+      data_type: DATA_HALF
+    }
+    filter {
+      dimension: 1
+      dimension: 1
+      dimension: 3
+      dimension: 3
+      format: TENSOR_NHWC
+      data_type: DATA_HALF
+    }
+    convolution {
+      pad: 1
+      pad: 1
+      compute_mode: DATA_FLOAT
+    }
+    fwd_algo: CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM
+    # Disabled to prevent crashing on normal runs.
+    label: "DISABLED_NHWC_PSUEDO_HALF_CONFIG_Crash"
+  }
+}
+
+# Checks that the testing code handles beta > 0 correctly.
+convolution_test {
+  reference {
+    one_minus_alpha: 0.3
+    beta: 0.4
+    input {
+      dimension: 1
+      dimension: 1
+      dimension: 128
+      dimension: 128
+      format: TENSOR_NCHW
+      data_type: DATA_FLOAT
+    }
+    filter {
+      dimension: 1
+      dimension: 1
+      dimension: 3
+      dimension: 3
+      format: TENSOR_NCHW
+      data_type: DATA_FLOAT
+    }
+    convolution {
+      pad: 1
+      pad: 1
+      compute_mode: DATA_FLOAT
+    }
+    fwd_algo: CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM
+    label: "BlendResult"
+  }
+  test {
+    all_algos: CONVOLUTION_FWD
+  }
+}
+

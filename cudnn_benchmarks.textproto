@@ -1,0 +1,27 @@
+# This file contains custom benchmark configs, in addition to the ones generated
+# in the source code.
+convolution_benchmark {
+  label: "example"
+  input {
+    dimension: 32
+    dimension: 1248
+    dimension: 5
+    dimension: 5
+    data_type: DATA_FLOAT
+    format: TENSOR_NCHW
+  }
+  filter {
+    dimension: 128
+    dimension: 1248
+    dimension: 1
+    dimension: 1
+    data_type: DATA_FLOAT
+    format: TENSOR_NCHW
+  }
+  convolution {
+    pad: 0
+    pad: 0
+    compute_mode: DATA_FLOAT
+  }
+  find_algo: CONVOLUTION_FWD
+}

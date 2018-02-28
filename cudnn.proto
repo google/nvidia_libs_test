@@ -1,0 +1,194 @@
+/*
+     * Copyright 2018 Google LLC
+     *
+     * Licensed under the Apache License, Version 2.0 (the "License");
+     * you may not use this file except in compliance with the License.
+     * You may obtain a copy of the License at
+     *
+     *     https://www.apache.org/licenses/LICENSE-2.0
+     *
+     * Unless required by applicable law or agreed to in writing, software
+     * distributed under the License is distributed on an "AS IS" BASIS,
+     * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+     * See the License for the specific language governing permissions and
+     * limitations under the License.
+     */
+
+syntax = "proto3";
+
+package nvidia_libs_test.proto;
+
+// Disable linter warning about '8x4' enum below.
+// LINT: LEGACY_NAMES
+
+// cuDNN API parameters represented as protos, plus aggregate messages that
+// specify cuDNN tests and benchmarks.
+
+// The enums below correspond to the cudnn*_t enum identifiers with CUDNN_*
+// enumerators. Enumerator fields are wrapped in oneofs because the zero-valued
+// enumerators do not correspond to default values.
+
+// Type of convolution to use.
+enum ConvolutionMode {
+  CONVOLUTION = 0;
+  CROSS_CORRELATION = 1;
+}
+
+// Data type of tensors and filters.
+enum DataType {
+  DATA_FLOAT = 0;
+  DATA_DOUBLE = 1;
+  DATA_HALF = 2;
+  DATA_INT8 = 3;
+  DATA_INT32 = 4;
+  DATA_INT8x4 = 5;
+}
+
+// Element ordering for 4D tensors and filters.
+enum TensorFormat {
+  TENSOR_NCHW = 0;
+  TENSOR_NHWC = 1;
+  TENSOR_NCHW_VECT_C = 2;
+}
+
+// Math ops to use for convolution.
+enum MathType {
+  DEFAULT_MATH = 0;
+  // Use Volta's tensor ALUs if available, default otherwise.
+  TENSOR_OP_MATH = 1;
+}
+
+// The convolution algorithm to use, or how to find the most suitable one.
+enum ConvolutionFwdAlgo {
+  CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM = 0;
+  CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM = 1;
+  CONVOLUTION_FWD_ALGO_GEMM = 2;
+  CONVOLUTION_FWD_ALGO_DIRECT = 3;
+  CONVOLUTION_FWD_ALGO_FFT = 4;
+  CONVOLUTION_FWD_ALGO_FFT_TILING = 5;
+  CONVOLUTION_FWD_ALGO_WINOGRAD = 6;
+  CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED = 7;
+}
+
+enum ConvolutionBwdDataAlgo {
+  CONVOLUTION_BWD_DATA_ALGO_0 = 0;  // non-deterministic
+  CONVOLUTION_BWD_DATA_ALGO_1 = 1;
+  CONVOLUTION_BWD_DATA_ALGO_FFT = 2;
+  CONVOLUTION_BWD_DATA_ALGO_FFT_TILING = 3;
+  CONVOLUTION_BWD_DATA_ALGO_WINOGRAD = 4;
+  CONVOLUTION_BWD_DATA_ALGO_WINOGRAD_NONFUSED = 5;
+}
+
+enum ConvolutionBwdFilterAlgo {
+  CONVOLUTION_BWD_FILTER_ALGO_0 = 0;  // non-deterministic
+  CONVOLUTION_BWD_FILTER_ALGO_1 = 1;
+  CONVOLUTION_BWD_FILTER_ALGO_FFT = 2;
+  CONVOLUTION_BWD_FILTER_ALGO_3 = 3;  // non-deterministic, algo0 with workspace
+  CONVOLUTION_BWD_FILTER_ALGO_WINOGRAD = 4;  // not implemented
+  CONVOLUTION_BWD_FILTER_ALGO_WINOGRAD_NONFUSED = 5;
+  CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING = 6;
+}
+
+// End of enums with cuDNN equivalents.
+
+// Describes a tensor of some rank. Passed to cudnnSetTensor?dDescriptor.
+message TensorDescriptor {
+  // The length is the rank of the tensor.
+  // NCHW order even if format below is NHWC.
+  repeated int32 dimension = 1;
+
+  oneof data_type_oneof {
+    DataType data_type = 2;
+  }
+
+  oneof format_oneof {
+    TensorFormat format = 3;  // Rank must be 4 if specified.
+  }
+  // Must be empty if format is specified, otherwise must have same length as
+  // dimension.
+  repeated int32 stride = 4;
+}
+
+// Describes a filter. Passed to cudnnSetFilterNdDescriptor.
+message FilterDescriptor {
+  repeated int32 dimension = 1;
+
+  oneof data_type_oneof {
+    DataType data_type = 2;
+  }
+  oneof format_oneof {
+    TensorFormat format = 3;
+  }
+}
+
+// Describes a convolution. Passed to cudnnSetConvolutionNdDescriptor.
+message ConvolutionDescriptor {
+  // Repeated fields below are expanded to same size using the default.
+  repeated int32 pad = 1;            // default = 0
+  repeated int32 filter_stride = 2;  // default = 1
+  repeated int32 dilation = 3;       // default = 1
+
+  oneof compute_mode_oneof {
+    DataType compute_mode = 4;
+  }
+
+  ConvolutionMode mode = 5;
+  MathType math_type = 6;  // TENSOR_OP_MATH requires cuDNN 7.
+  int32 group_count = 7;   // >1 requires cuDNN 7.
+}
+
+enum ConvolutionDirection {
+  CONVOLUTION_DIRECTION_UNSPECIFIED = 0;
+  CONVOLUTION_FWD = 1;
+  CONVOLUTION_BWD_DATA = 2;
+  CONVOLUTION_BWD_FILTER = 3;
+}
+
+// Describes a forward, backward data, or backward filter convolution.
+message ConvolutionConfig {
+  TensorDescriptor input = 1;   // required
+  FilterDescriptor filter = 2;  // required
+  ConvolutionDescriptor convolution = 3;
+  TensorDescriptor output = 4;
+  double one_minus_alpha = 5;
+  double beta = 6;
+
+  oneof algo_oneof {
+    ConvolutionFwdAlgo fwd_algo = 7;
+    ConvolutionBwdDataAlgo bwd_data_algo = 8;
+    ConvolutionBwdFilterAlgo bwd_filter_algo = 9;
+    // Only allowed for convolution_test.test. Runs all supported algos.
+    ConvolutionDirection all_algos = 10;
+    // Only allowed for convolution_benchmark. Finds the fastest algo.
+    ConvolutionDirection find_algo = 11;
+  }
+
+  oneof workspace_oneof {
+    // Only relevant for all_algos and find_algo. Default is all
+    // unallocated memory up to the device_memory_limit flag value.
+    uint64 workspace_limit = 12;
+  }
+
+  string label = 13;
+}
+
+// ConvolutionTest.CompareResults checks that element-wise maximum difference
+// between the results of two convolutions is within a threshold. The threshold
+// is computed based on the parameters, see cudnn_all_test.cc.
+//
+// A ConvolutionTest instance can specify a series of comparisons against the
+// convolution specified by the 'reference' field. The other convolution is
+// specified by merging one 'test' message with the 'reference' message,
+// and running one of the algorithms requested.
+message ConvolutionTest {
+  ConvolutionConfig reference = 1;
+  repeated ConvolutionConfig test = 2;
+}
+
+message Tests {
+  repeated ConvolutionTest convolution_test = 1;
+}
+
+message Benchmarks {
+  repeated ConvolutionConfig convolution_benchmark = 1;
+}
