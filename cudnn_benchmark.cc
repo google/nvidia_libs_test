@@ -81,23 +81,21 @@ Status ConvolutionBenchmark(benchmark::State& state,
   CudnnHandle handle = CreateCudnnHandle();
   RandomGenerator rand_gen(/*seed=*/0);
 
-  auto conv_or = CreateConvolution(proto, rand_gen);
-  RETURN_IF_ERROR_STATUS(conv_or.status());
-  Convolution benchmark = std::move(conv_or.ValueOrDie());
+  ASSIGN_OR_RETURN_STATUS(Convolution benchmark,
+                          CreateConvolution(proto, rand_gen));
 
-  auto size_or = GetWorkspaceLimit(proto);
-  RETURN_IF_ERROR_STATUS(size_or.status());
-  size_t workspace_limit = size_or.ValueOrDie();
+  ASSIGN_OR_RETURN_STATUS(size_t workspace_limit, GetWorkspaceLimit(proto));
 
   ConvolutionAlgo algo;
   switch (proto.algo_oneof_case()) {
     case proto::ConvolutionConfig::kFindAlgo: {
-      auto algo_or = FindConvolutionAlgo(
-          handle, proto.find_algo(), benchmark.input_desc, benchmark.input_data,
-          benchmark.filter_desc, benchmark.filter_data, benchmark.conv_desc,
-          benchmark.output_desc, benchmark.output_data, workspace_limit);
-      RETURN_IF_ERROR_STATUS(algo_or.status());
-      algo = algo_or.ValueOrDie();
+      ASSIGN_OR_RETURN_STATUS(
+          algo,
+          FindConvolutionAlgo(handle, proto.find_algo(), benchmark.input_desc,
+                              benchmark.input_data, benchmark.filter_desc,
+                              benchmark.filter_data, benchmark.conv_desc,
+                              benchmark.output_desc, benchmark.output_data,
+                              workspace_limit));
     } break;
     case proto::ConvolutionConfig::kFwdAlgo:
       algo = static_cast<cudnnConvolutionFwdAlgo_t>(proto.fwd_algo());
@@ -113,15 +111,12 @@ Status ConvolutionBenchmark(benchmark::State& state,
       LOG(FATAL) << "Invalid algo_oneof_case.";
   }
 
-  size_or =
+  ASSIGN_OR_RETURN_STATUS(
+      size_t workspace_size,
       GetWorkspaceSize(handle, benchmark.input_desc, benchmark.filter_desc,
-                       benchmark.conv_desc, benchmark.output_desc, algo);
-  RETURN_IF_ERROR_STATUS(size_or.status());
-  size_t workspace_size = size_or.ValueOrDie();
+                       benchmark.conv_desc, benchmark.output_desc, algo));
 
-  auto data_or = AllocateDeviceMemory(workspace_size);
-  RETURN_IF_ERROR_STATUS(data_or.status());
-  auto workspace = std::move(data_or.ValueOrDie());
+  ASSIGN_OR_RETURN_STATUS(auto workspace, AllocateDeviceMemory(workspace_size));
 
   double alpha = 1.0 - proto.one_minus_alpha();
   double beta = proto.beta();
@@ -162,13 +157,11 @@ Status TransformationBenchmark(benchmark::State& state,
   TensorDescriptor first_desc = CreateTensorDescriptor(first);
   TensorDescriptor second_desc = CreateTensorDescriptor(second);
 
-  auto data_or = CreateTensorData(first_desc, rand_gen);
-  RETURN_IF_ERROR_STATUS(data_or.status());
-  auto first_data = std::move(data_or.ValueOrDie());
+  ASSIGN_OR_RETURN_STATUS(auto first_data,
+                          CreateTensorData(first_desc, rand_gen));
 
-  data_or = CreateTensorData(second_desc, rand_gen);
-  RETURN_IF_ERROR_STATUS(data_or.status());
-  auto second_data = std::move(data_or.ValueOrDie());
+  ASSIGN_OR_RETURN_STATUS(auto second_data,
+                          CreateTensorData(second_desc, rand_gen));
 
   auto kernel_timer = GetTimer();
   kernel_timer->StartTiming();

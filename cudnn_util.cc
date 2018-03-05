@@ -97,24 +97,6 @@ void ConvolutionDescriptorDeleter::operator()(
 }
 }  // namespace detail
 
-std::ostream& operator<<(std::ostream& str, const ConvolutionAlgo& algo) {
-  struct Visitor {
-    string operator()(cudnnConvolutionFwdAlgo_t algo) const {
-      return proto::ConvolutionFwdAlgo_Name(
-          static_cast<proto::ConvolutionFwdAlgo>(algo));
-    }
-    string operator()(cudnnConvolutionBwdDataAlgo_t algo) const {
-      return proto::ConvolutionBwdDataAlgo_Name(
-          static_cast<proto::ConvolutionBwdDataAlgo>(algo));
-    }
-    string operator()(cudnnConvolutionBwdFilterAlgo_t algo) const {
-      return proto::ConvolutionBwdFilterAlgo_Name(
-          static_cast<proto::ConvolutionBwdFilterAlgo>(algo));
-    }
-  };
-  return str << visit(Visitor(), algo);
-}
-
 CudnnHandle CreateCudnnHandle() {
   cudnnHandle_t result;
   CHECK_OK_STATUS(GetStatus(cudnnCreate(&result)));
@@ -484,9 +466,8 @@ StatusOr<ConvolutionAlgo> FindConvolutionAlgo(
     const ConvolutionDescriptor& convolution_desc,
     const TensorDescriptor& output_desc, const DeviceMemory& output_data,
     size_t workspace_limit) {
-  auto workspace_or = AllocateDeviceMemory(workspace_limit);
-  RETURN_IF_ERROR_STATUS(workspace_or.status());
-  auto workspace = std::move(workspace_or.ValueOrDie());
+  ASSIGN_OR_RETURN_STATUS(auto workspace,
+                          AllocateDeviceMemory(workspace_limit));
   int num_algorithms = 0;
   switch (direction) {
     case proto::CONVOLUTION_FWD: {
@@ -616,9 +597,7 @@ Status ConvertAndTransformTensor(const CudnnHandle& handle, double alpha,
       src_desc_data.dimensions, src_desc_data.strides)));
 
   size_t temp_size = GetTensorSizeInBytes(temp_desc);
-  auto temp_data_or = AllocateDeviceMemory(temp_size);
-  RETURN_IF_ERROR_STATUS(temp_data_or.status());
-  DeviceMemory temp_data = std::move(temp_data_or.ValueOrDie());
+  ASSIGN_OR_RETURN_STATUS(auto temp_data, AllocateDeviceMemory(temp_size));
 
   visit(ConvertDeviceDataVisitor{temp_size, alpha},
         GetPointerVariant(temp_data, dst_desc_data.data_type),
@@ -753,14 +732,12 @@ Status RunConvolution(const CudnnHandle& handle, const ConvolutionAlgo& algo,
                       const ConvolutionDescriptor& convolution_desc,
                       const TensorDescriptor& output_desc,
                       const DeviceMemory& output_data) {
-  auto workspace_size_or = GetWorkspaceSize(
-      handle, input_desc, filter_desc, convolution_desc, output_desc, algo);
-  RETURN_IF_ERROR_STATUS(workspace_size_or.status());
-  size_t workspace_size = workspace_size_or.ValueOrDie();
+  ASSIGN_OR_RETURN_STATUS(
+      auto workspace_size,
+      GetWorkspaceSize(handle, input_desc, filter_desc, convolution_desc,
+                       output_desc, algo));
 
-  auto workspace_or = AllocateDeviceMemory(workspace_size);
-  RETURN_IF_ERROR_STATUS(workspace_or.status());
-  auto workspace = std::move(workspace_or.ValueOrDie());
+  ASSIGN_OR_RETURN_STATUS(auto workspace, AllocateDeviceMemory(workspace_size));
 
   return RunConvolution(handle, algo, alpha, beta, input_desc, input_data,
                         filter_desc, filter_data, convolution_desc, output_desc,
@@ -777,27 +754,42 @@ StatusOr<Convolution> CreateConvolution(const proto::ConvolutionConfig& proto,
   auto filter_desc = CreateFilterDescriptor(proto.filter());
   auto conv_desc = CreateConvolutionDescriptor(proto.convolution());
 
-  auto desc_or =
-      CreateOutputDescriptor(proto, input_desc, filter_desc, conv_desc);
-  RETURN_IF_ERROR_STATUS(desc_or.status());
-  auto output_desc = std::move(desc_or.ValueOrDie());
+  ASSIGN_OR_RETURN_STATUS(
+      auto output_desc,
+      CreateOutputDescriptor(proto, input_desc, filter_desc, conv_desc));
 
-  auto data_or = CreateTensorData(input_desc, rand_gen);
-  RETURN_IF_ERROR_STATUS(data_or.status());
-  auto input_data = std::move(data_or.ValueOrDie());
+  ASSIGN_OR_RETURN_STATUS(auto input_data,
+                          CreateTensorData(input_desc, rand_gen));
 
-  data_or = CreateFilterData(filter_desc, rand_gen);
-  RETURN_IF_ERROR_STATUS(data_or.status());
-  auto filter_data = std::move(data_or.ValueOrDie());
+  ASSIGN_OR_RETURN_STATUS(auto filter_data,
+                          CreateFilterData(filter_desc, rand_gen));
 
-  data_or = CreateTensorData(output_desc, rand_gen);
-  RETURN_IF_ERROR_STATUS(data_or.status());
-  auto output_data = std::move(data_or.ValueOrDie());
+  ASSIGN_OR_RETURN_STATUS(auto output_data,
+                          CreateTensorData(output_desc, rand_gen));
 
   return Convolution{std::move(input_desc),  std::move(filter_desc),
                      std::move(output_desc), std::move(conv_desc),
                      std::move(input_data),  std::move(filter_data),
                      std::move(output_data)};
+}
+
+namespace {
+string GetAlgoName(const ConvolutionAlgo& algo) {
+  struct Visitor {
+    string operator()(cudnnConvolutionFwdAlgo_t algo) const {
+      return proto::ConvolutionFwdAlgo_Name(
+          static_cast<proto::ConvolutionFwdAlgo>(algo));
+    }
+    string operator()(cudnnConvolutionBwdDataAlgo_t algo) const {
+      return proto::ConvolutionBwdDataAlgo_Name(
+          static_cast<proto::ConvolutionBwdDataAlgo>(algo));
+    }
+    string operator()(cudnnConvolutionBwdFilterAlgo_t algo) const {
+      return proto::ConvolutionBwdFilterAlgo_Name(
+          static_cast<proto::ConvolutionBwdFilterAlgo>(algo));
+    }
+  };
+  return visit(Visitor(), algo);
 }
 
 #define CHECK_ENUMERATOR(enumerator)                      \
@@ -850,4 +842,10 @@ CHECK_ENUM_SIZE(ConvolutionBwdFilterAlgo, CONVOLUTION_BWD_FILTER_ALGO);
 CHECK_ENUMERATOR(DEFAULT_MATH);
 CHECK_ENUMERATOR(TENSOR_OP_MATH);
 #endif
+}  // namespace
 }  // namespace nvidia_libs_test
+
+std::ostream& operator<<(std::ostream& str,
+                         const nvidia_libs_test::ConvolutionAlgo& algo) {
+  return str << nvidia_libs_test::GetAlgoName(algo);
+}

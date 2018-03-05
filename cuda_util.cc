@@ -125,10 +125,16 @@ cudaDeviceProp GetDeviceProperties() {
 }
 }  // namespace
 
-bool DeviceSupportsReducedPrecision() {
-  cudaDeviceProp props = GetDeviceProperties();
-  return props.major >= 6 || (props.major == 5 && props.minor >= 3);
+bool DeviceHasAtLeastComputeCapability(int major, int minor) {
+  static cudaDeviceProp props = GetDeviceProperties();
+  return props.major > major || (props.major == major && props.minor >= minor);
 }
 
-bool DeviceSupportsTensorOpMath() { return GetDeviceProperties().major >= 7; }
+bool DeviceSupportsReducedPrecision() {
+  return DeviceHasAtLeastComputeCapability(5, 3);
+}
+
+bool DeviceSupportsTensorOpMath() {
+  return DeviceHasAtLeastComputeCapability(7, 0);
+}
 }  // namespace nvidia_libs_test

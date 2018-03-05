@@ -116,6 +116,9 @@ void ConvertDeviceData(double scale, __half* dst, const double* src,
 void ConvertDeviceData(double scale, double* dst, const __half* src,
                        size_t num_elements);
 
+// Returns whether the device is at least 'sm_<major>.<minor>'.
+bool DeviceHasAtLeastComputeCapability(int major, int minor);
+
 // Returns whether the device supports reduced precision math (fp16). Returns
 // true for sm_61, even though it has very low reduced precision throughput.
 bool DeviceSupportsReducedPrecision();

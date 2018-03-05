@@ -130,10 +130,9 @@ double GetToleranceScale(const proto::ConvolutionConfig& proto) {
     case proto::DATA_FLOAT:
       return 1.0;
     case proto::DATA_DOUBLE:
-      // TODO: For e.g. sm_60, 1e-8 works as well. Figure out which
-      // architectures use kernels with better double accuracy and conditionally
-      // return a lower scale.
-      return 1e-2;
+      // cuDNN uses different kernels for architectures before Maxwell that have
+      // much lower double accuracy.
+      return DeviceHasAtLeastComputeCapability(5, 0) ? 1e-8 : 1e-2;
     case proto::DATA_HALF:
       if (proto.convolution().math_type() == proto::TENSOR_OP_MATH) {
         return 1e+4;  // Using tensor ops.
@@ -277,32 +276,21 @@ TEST_P(ConvolutionTest, CompareResults) {
   // result.
 
   auto ref_proto = GetParam().reference();
-  auto conv_or = CreateConvolution(ref_proto, rand_gen);
-  ASSERT_TRUE(IsOk(conv_or));
-  auto reference = std::move(conv_or.ValueOrDie());
+  ASSERT_OK_AND_ASSIGN(auto reference, CreateConvolution(ref_proto, rand_gen));
 
   ASSERT_NE(ref_proto.algo_oneof_case(), proto::ConvolutionConfig::kAllAlgos);
   auto ref_algo = GetAlgorithms(ref_proto, handle, reference, 0).front();
 
-  // Workaround for failing ADL: call operator<< in nvidia_libs_test namespace.
-  auto to_string = [](const ConvolutionAlgo& algo) {
-    std::ostringstream oss;
-    oss << algo;
-    return oss.str();
-  };
-
   // Run reference convolution with default scaling factors.
   ASSERT_TRUE(IsOk(RunConvolution(1.0, 0.0, handle, reference, ref_algo)))
-      << "algo: " << to_string(ref_algo);
+      << "algo: " << ref_algo;
 
   auto ref_filter_tensor_desc =
       CreateTensorDescriptor(GetFilterTensorDescriptor(ref_proto.filter()));
 
   for (auto proto : GetParam().test()) {
     proto = GetMergedConvolution(ref_proto, proto);
-    conv_or = CreateConvolution(proto, rand_gen);
-    ASSERT_TRUE(IsOk(conv_or));
-    Convolution test = std::move(conv_or.ValueOrDie());
+    ASSERT_OK_AND_ASSIGN(Convolution test, CreateConvolution(proto, rand_gen));
 
     // We now have input, filter, and output buffers for the reference and the
     // test. A convolution has two read-only argument buffers and writes the
@@ -374,9 +362,7 @@ TEST_P(ConvolutionTest, CompareResults) {
 
     // Make a copy of the test result buffer so that we can reset it to the same
     // random values before running each algorithm.
-    auto data_or = AllocateDeviceMemory(result_size);
-    ASSERT_TRUE(IsOk(data_or));
-    auto init_data = std::move(data_or.ValueOrDie());
+    ASSERT_OK_AND_ASSIGN(auto init_data, AllocateDeviceMemory(result_size));
     ASSERT_TRUE(IsOk(CopyDeviceMemory(init_data, *result_data, result_size)));
 
     // Blend the reference buffers into the corresponding test buffers. This
@@ -397,15 +383,12 @@ TEST_P(ConvolutionTest, CompareResults) {
     // The test result buffer (pointee of result_data) now contains the copy of
     // the reference result buffer. Stash that away in ref_result_data and
     // allocate a new buffer for the test's actual result buffer.
-    data_or = AllocateDeviceMemory(result_size);
-    ASSERT_TRUE(IsOk(data_or));
-    auto ref_result_data = std::move(data_or.ValueOrDie());
+    ASSERT_OK_AND_ASSIGN(auto ref_result_data,
+                         AllocateDeviceMemory(result_size));
     std::swap(*result_data, ref_result_data);
 
     // Get available workspace size (after allocating all device memory).
-    auto size_or = GetWorkspaceLimit(proto);
-    ASSERT_TRUE(IsOk(size_or));
-    size_t workspace_limit = size_or.ValueOrDie();
+    ASSERT_OK_AND_ASSIGN(auto workspace_limit, GetWorkspaceLimit(proto));
 
     // Run all supported algorithms for current test.
     double tolerance_scale = GetToleranceScale(proto);
@@ -413,14 +396,26 @@ TEST_P(ConvolutionTest, CompareResults) {
          GetAlgorithms(proto, handle, test, workspace_limit)) {
       // Reset the test result buffer and run the convolution.
       ASSERT_TRUE(IsOk(CopyDeviceMemory(*result_data, init_data, result_size)));
+      auto get_message = [&] {
+        std::ostringstream oss;
+        oss << "format: " << proto::TensorFormat_Name(proto.input().format())
+            << "\ndata_type: "
+            << proto::DataType_Name(proto.input().data_type())
+            << "\ncompute_mode: "
+            << proto::DataType_Name(proto.convolution().compute_mode())
+            << "\nmath_type: "
+            << proto::MathType_Name(proto.convolution().math_type())
+            << "\nalgo: " << algo;
+        return oss.str();
+      };
       ASSERT_TRUE(IsOk(RunConvolution(alpha, beta, handle, test, algo)))
-          << proto.label() << "\nalgo: " << to_string(algo);
+          << get_message();
       // Check that the test result matches the reference result. This also
       // compares buffer elements not referenced by the tensor.
       double tolerance = tolerance_scale * GetTolerance(algo);
       EXPECT_TRUE(IsOk(TensorDataEqual(ref_result_data, *result_data,
                                        *result_desc, tolerance)))
-          << proto.label() << "\nalgo: " << to_string(algo);
+          << get_message();
     }
   }
 }
@@ -456,9 +451,8 @@ TEST_P(ConvolutionTest, GetAlgorithm_v7) {
     auto filter = CreateFilterDescriptor(proto.filter());
     auto convolution = CreateConvolutionDescriptor(proto.convolution());
 
-    auto desc_or = CreateOutputDescriptor(proto, input, filter, convolution);
-    ASSERT_TRUE(IsOk(desc_or));
-    auto output = std::move(desc_or.ValueOrDie());
+    ASSERT_OK_AND_ASSIGN(
+        auto output, CreateOutputDescriptor(proto, input, filter, convolution));
 
     std::vector<ConvolutionAlgo> get_v7_algos;
     int num_algorithms = 0;
@@ -507,10 +501,13 @@ TEST_P(ConvolutionTest, GetAlgorithm_v7) {
 }
 #endif  // CUDNN_MAJOR >= 7
 
-proto::ConvolutionConfig MakeReference(int batch_count, int in_depth,
-                                       int in_height, int in_width,
-                                       int out_depth, int filter_height,
-                                       int filter_width, Padding padding) {
+// Creates a ConvolutionConfig from the given parameters for
+// proto.ConvolutionTest.reference.
+proto::ConvolutionConfig MakeConvolutionConfig(int batch_count, int in_depth,
+                                               int in_height, int in_width,
+                                               int out_depth, int filter_height,
+                                               int filter_width,
+                                               Padding padding) {
   proto::TensorDescriptor input;
   for (int dim : {batch_count, in_depth, in_height, in_width}) {
     input.add_dimension(dim);
@@ -537,75 +534,223 @@ proto::ConvolutionConfig MakeReference(int batch_count, int in_depth,
   *result.mutable_input() = std::move(input);
   *result.mutable_filter() = std::move(filter);
   *result.mutable_convolution() = std::move(convolution);
+
   return result;
 }
 
-proto::ConvolutionConfig MakeConvolution(proto::TensorFormat format,
-                                         proto::DataType data_type,
-                                         proto::DataType compute_mode,
-                                         proto::MathType math_type) {
+struct SizeRange {
+  int minimum;
+  int maximum;
+};
+
+// Returns range ['largest 2^k+1 not greater than size', size].
+SizeRange MakePowerOfTwoRange(int size) {
+  CHECK_GT(size, 0);
+  int power_of_two = 1;
+  while (power_of_two < size) {
+    power_of_two *= 2;
+  }
+  return {power_of_two / 2 + 1, size};
+}
+
+// Creates a randomized ConvolutionConfig from the given parameter ranges for
+// proto.ConvolutionTest.reference. For VALID padding, the ranges of input size
+// and filter size are clamped so that the filter is no larger then the inputs.
+template <typename RandGen>
+proto::ConvolutionConfig MakeConvolutionConfig(
+    RandGen&& rand_gen, SizeRange batch_count_range, SizeRange in_depth_range,
+    SizeRange in_height_range, SizeRange in_width_range,
+    SizeRange out_depth_range, SizeRange filter_height_range,
+    SizeRange filter_width_range, Padding padding) {
+  if (padding == Padding::VALID) {
+    in_height_range.minimum =
+        std::max(in_height_range.minimum, filter_height_range.minimum);
+    in_width_range.minimum =
+        std::max(in_width_range.minimum, filter_width_range.minimum);
+  }
+
+  auto randomize = [&](const SizeRange& range) {
+    CHECK_LE(range.minimum, range.maximum);
+    return std::uniform_int_distribution<int>{range.minimum,
+                                              range.maximum}(rand_gen);
+  };
+  int batch_count = randomize(batch_count_range);
+  int in_depth = randomize(in_depth_range);
+  int in_height = randomize(in_height_range);
+  int in_width = randomize(in_width_range);
+  int out_depth = randomize(out_depth_range);
+
+  if (padding == Padding::VALID) {
+    filter_height_range.maximum =
+        std::min(filter_height_range.maximum, in_height);
+    filter_width_range.maximum = std::min(filter_width_range.maximum, in_width);
+  }
+  int filter_height = randomize(filter_height_range);
+  int filter_width = randomize(filter_width_range);
+
+  auto result =
+      MakeConvolutionConfig(batch_count, in_depth, in_height, in_width,
+                            out_depth, filter_height, filter_width, padding);
+
+  std::ostringstream label;
+  label << batch_count << 'x' << in_depth << 'x' << in_height << 'x' << in_width
+        << '_' << out_depth << 'x' << in_depth << 'x' << filter_height << 'x'
+        << filter_width << '_' << (padding == Padding::SAME ? "SAME" : "VALID");
+  result.set_label(label.str());
+
+  return result;
+}
+
+// Set of format and data type configurations to run. For details, see
+// http://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnConvolutionForward
+enum class Config {
+  NCHW_FLOAT,
+  NCHW_DOUBLE,
+  NCHW_PSEUDO_HALF,
+  NCHW_TRUE_HALF,
+  NCHW_TENSOR_OP,
+  NHWC_FLOAT,
+  NHWC_PSEUDO_HALF
+};
+
+// Returns whether cuDNN supports the given config on the current device.
+bool IsConfigSupported(Config config) {
+  switch (config) {
+    case Config::NCHW_PSEUDO_HALF:
+      return DeviceSupportsReducedPrecision();
+    case Config::NCHW_TRUE_HALF:
+      return DeviceSupportsReducedPrecision();
+    case Config::NCHW_TENSOR_OP:
+      return CUDNN_MAJOR >= 7 && DeviceSupportsTensorOpMath();
+    case Config::NHWC_FLOAT:
+      // Internal error on cudNN 6, see cudnn_tests.textproto.
+      return CUDNN_MAJOR >= 7;
+    case Config::NHWC_PSEUDO_HALF:
+      // Crashes on cuDNN 6, see cudnn_tests.textproto.
+      return CUDNN_MAJOR >= 7 && DeviceSupportsReducedPrecision();
+    default:
+      return true;
+  }
+}
+
+// Creates a ConvolutionConfig from the given config for
+// proto.ConvolutionTest.test.
+proto::ConvolutionConfig MakeConvolutionConfig(Config config) {
+  proto::TensorFormat format;
+  proto::DataType data_type;
+  proto::DataType compute_mode;
+  proto::MathType math_type;
+  string label;
+  switch (config) {
+    case Config::NCHW_FLOAT:
+      format = proto::TENSOR_NCHW;
+      data_type = proto::DATA_FLOAT;
+      compute_mode = proto::DATA_FLOAT;
+      math_type = proto::DEFAULT_MATH;
+      label = "NCHW_FLOAT";
+      break;
+    case Config::NCHW_DOUBLE:
+      format = proto::TENSOR_NCHW;
+      data_type = proto::DATA_DOUBLE;
+      compute_mode = proto::DATA_DOUBLE;
+      math_type = proto::DEFAULT_MATH;
+      label = "NCHW_DOUBLE";
+      break;
+    case Config::NCHW_PSEUDO_HALF:
+      format = proto::TENSOR_NCHW;
+      data_type = proto::DATA_HALF;
+      compute_mode = proto::DATA_FLOAT;
+      math_type = proto::DEFAULT_MATH;
+      label = "NCHW_PSEUDO_HALF";
+      break;
+    case Config::NCHW_TRUE_HALF:
+      format = proto::TENSOR_NCHW;
+      data_type = proto::DATA_HALF;
+      compute_mode = proto::DATA_HALF;
+      math_type = proto::DEFAULT_MATH;
+      label = "NCHW_TRUE_HALF";
+      break;
+    case Config::NCHW_TENSOR_OP:
+      format = proto::TENSOR_NCHW;
+      data_type = proto::DATA_HALF;
+      compute_mode = proto::DATA_HALF;
+      math_type = proto::TENSOR_OP_MATH;
+      label = "NCHW_TENSOR_OP";
+      break;
+    case Config::NHWC_FLOAT:
+      format = proto::TENSOR_NHWC;
+      data_type = proto::DATA_FLOAT;
+      compute_mode = proto::DATA_FLOAT;
+      math_type = proto::DEFAULT_MATH;
+      label = "NHWC_FLOAT";
+      break;
+    case Config::NHWC_PSEUDO_HALF:
+      format = proto::TENSOR_NHWC;
+      data_type = proto::DATA_HALF;
+      compute_mode = proto::DATA_FLOAT;
+      math_type = proto::DEFAULT_MATH;
+      label = "NHWC_PSEUDO_HALF";
+      break;
+    default:
+      LOG(FATAL) << "Unknown config";
+  }
+
   proto::ConvolutionConfig result;
   result.mutable_input()->set_format(format);
   result.mutable_input()->set_data_type(data_type);
-  result.mutable_filter()->set_data_type(data_type);
   result.mutable_filter()->set_format(format);
+  result.mutable_filter()->set_data_type(data_type);
   result.mutable_convolution()->set_compute_mode(compute_mode);
   result.mutable_convolution()->set_math_type(math_type);
-  std::ostringstream oss;
-  oss << "format: " << proto::TensorFormat_Name(format)
-      << "\ndata_type: " << proto::DataType_Name(data_type)
-      << "\ncompute_mode: " << proto::DataType_Name(compute_mode)
-      << "\nmath_type: " << proto::MathType_Name(math_type);
-  result.set_label(oss.str());
+  result.set_label(label);
   return result;
 }
 
 // Returns true if cuDNN should handle the given parameters for at least one
 // algorithm. Changes to this function will not just drop some tests, but
 // completely alter the set of generated tests!
-bool ValidateParams(const absl::optional<int> opt_batch_count,
-                    const absl::optional<int> opt_in_depth,
-                    const absl::optional<int> opt_in_height,
-                    const absl::optional<int> opt_in_width,
-                    const absl::optional<int> opt_out_depth,
-                    const absl::optional<int> opt_filter_height,
-                    const absl::optional<int> opt_filter_width,
-                    const absl::optional<Padding> opt_padding) {
+bool ValidateParams(const absl::optional<SizeRange> opt_batch_count,
+                    const absl::optional<SizeRange> opt_in_depth,
+                    const absl::optional<SizeRange> opt_in_height,
+                    const absl::optional<SizeRange> opt_in_width,
+                    const absl::optional<SizeRange> opt_out_depth,
+                    const absl::optional<SizeRange> opt_filter_height,
+                    const absl::optional<SizeRange> opt_filter_width,
+                    const absl::optional<Padding> opt_padding,
+                    const absl::optional<Config> opt_config) {
   // Default to medium sizes so we don't paint ourselves in a corner.
-  int batch_count = opt_batch_count.value_or(32);
-  int in_depth = opt_in_depth.value_or(32);
-  int in_height = opt_in_height.value_or(32);
-  int in_width = opt_in_width.value_or(32);
-  int out_depth = opt_out_depth.value_or(32);
-  int filter_height = opt_filter_height.value_or(3);
-  int filter_width = opt_filter_width.value_or(3);
+  SizeRange image_range{32, 32};
+  SizeRange filter_range{5, 5};
+  SizeRange batch_count = opt_batch_count.value_or(image_range);
+  SizeRange in_depth = opt_in_depth.value_or(image_range);
+  SizeRange in_height = opt_in_height.value_or(image_range);
+  SizeRange in_width = opt_in_width.value_or(image_range);
+  SizeRange out_depth = opt_out_depth.value_or(image_range);
+  SizeRange filter_height = opt_filter_height.value_or(filter_range);
+  SizeRange filter_width = opt_filter_width.value_or(filter_range);
   Padding padding = opt_padding.value_or(Padding::SAME);
+  Config config = opt_config.value_or(Config::NCHW_FLOAT);
 
   size_t million = 1ull << 20;  // 1 million as in MiB.
-  size_t max_tensor_elements = static_cast<size_t>(batch_count) *
-                               std::max(in_depth, out_depth) * in_height *
-                               in_width;
+  size_t max_tensor_elements = static_cast<size_t>(batch_count.maximum) *
+                               std::max(in_depth.maximum, out_depth.maximum) *
+                               in_height.maximum * in_width.maximum;
 
   if (max_tensor_elements >= 2048 * million) {
     // cuDNN has a limit of less (!) than 2G elements per tensor.
     return false;
   }
 
-  int in_padded_height = in_height;
-  int in_padded_width = in_width;
-  if (padding == Padding::SAME) {
-    // Add padding to input size (filter_size / 2 on each side).
-    in_padded_height += filter_height & ~1;
-    in_padded_width += filter_width & ~1;
-  }
-
-  if (in_padded_height < filter_height || in_padded_width < filter_width) {
-    // Filter cannot be larger than padded input image.
+  if (padding == Padding::VALID && (filter_height.minimum > in_height.maximum ||
+                                    filter_width.minimum > in_height.maximum)) {
+    // VALID padding requires the filter to be no smaller than the input.
     return false;
   }
 
-  auto proto = MakeReference(batch_count, in_depth, in_height, in_width,
-                             out_depth, filter_height, filter_width, padding);
+  auto proto = MakeConvolutionConfig(batch_count.maximum, in_depth.maximum,
+                                     in_height.maximum, in_width.maximum,
+                                     out_depth.maximum, filter_height.maximum,
+                                     filter_width.maximum, padding);
 
   auto input = CreateTensorDescriptor(proto.input());
   auto filter = CreateFilterDescriptor(proto.filter());
@@ -616,115 +761,125 @@ bool ValidateParams(const absl::optional<int> opt_batch_count,
     return false;
   }
 
-  size_t input_size = GetTensorSizeInBytes(input);
-  size_t filter_size = GetFilterNumElements(filter) * sizeof(double);
-  size_t output_size = GetTensorSizeInBytes(output_or.ValueOrDie());
-  size_t required_size = 2 * (input_size + filter_size + output_size) +
-                         // For CompareResults' init_data and ref_result_data.
-                         2 * std::max({input_size, filter_size, output_size});
+  // Compute the size of device allocations in CompareResults and return whether
+  // it fits the specified memory limit.
 
-  if (required_size > GetAvailableDeviceMemoryBytes()) {
+  size_t data_type_size;
+  switch (MakeConvolutionConfig(config).filter().data_type()) {
+    case proto::DATA_FLOAT:
+      data_type_size = sizeof(float);
+      break;
+    case proto::DATA_DOUBLE:
+      data_type_size = sizeof(double);
+      break;
+    case proto::DATA_HALF:
+      data_type_size = sizeof(__half);
+      break;
+    default:
+      LOG(FATAL) << "Not yet supported";
+  }
+
+  size_t input_num_elements = GetTensorNumElements(input);
+  size_t filter_num_elements = GetFilterNumElements(filter) * sizeof(double);
+  size_t output_num_elements = GetTensorNumElements(output_or.ValueOrDie());
+
+  size_t sum_num_elements =
+      input_num_elements + filter_num_elements + output_num_elements;
+  size_t max_num_elements =
+      std::max({input_num_elements, filter_num_elements, output_num_elements});
+
+  // Number of buffers for CompareResults' init_data, ref_result_data and
+  // (if conversion from double is needed) ConvertAndTransformTensor.
+  size_t num_extra_buffers = data_type_size == sizeof(double) ? 2 : 3;
+
+  size_t required_bytes = (sizeof(double) + data_type_size) * sum_num_elements +
+                          num_extra_buffers * data_type_size * max_num_elements;
+  if (required_bytes > GetAvailableDeviceMemoryBytes()) {
     return false;
   }
 
   return true;
 }
 
-// Returns a list of tests, one for each generated parameter combination,
-// direction, and format (NCHW or NHWC).
+// Returns a list of tests, one for every direction per generated parameter
+// combination.
 google::protobuf::RepeatedPtrField<proto::ConvolutionTest> MakeTests(
-    const std::vector<int>& filter_sizes) {
-  std::vector<int> batch_counts{
-      1,   2,   3,   4,   7,   8,   11,   12,   16,   23,   24,  25, 27,
-      31,  32,  39,  42,  48,  51,  63,   64,   67,   79,   81,  92, 107,
-      127, 128, 129, 233, 256, 453, 1000, 1023, 1024, 1025, 2048};
-  std::vector<int> depths{1,  2,  3,  4,   7,   8,   11,  12,  16,   23,
-                          24, 64, 96, 128, 192, 224, 384, 768, 1248, 2048};
-  std::vector<int> image_sizes{1,  2,  3,  4,  7,  8,  11,  14,  17,  19,
-                               24, 31, 32, 33, 39, 42, 47,  49,  62,  63,
-                               64, 65, 73, 79, 81, 92, 107, 127, 128, 129};
-
+    const std::vector<SizeRange>& filter_sizes) {
+  // Create consecutive closed ranges [2^(k-1)+1, 2^k].
+  std::vector<SizeRange> size_ranges;
+  for (int size : {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048}) {
+    size_ranges.push_back(MakePowerOfTwoRange(size));
+  }
+  std::vector<SizeRange> batch_counts = size_ranges;
+  std::vector<SizeRange> depths = size_ranges;
+  std::vector<SizeRange> image_sizes = size_ranges;
   std::vector<Padding> paddings{Padding::SAME, Padding::VALID};
+  std::vector<Config> configs{Config::NCHW_FLOAT,       Config::NCHW_DOUBLE,
+                              Config::NCHW_PSEUDO_HALF, Config::NCHW_TRUE_HALF,
+                              Config::NCHW_TENSOR_OP,   Config::NHWC_FLOAT,
+                              Config::NHWC_PSEUDO_HALF};
 
   CudnnHandle handle = CreateCudnnHandle();
   auto validator = MakeCallWithTuple(ValidateParams);
 
-  auto params_vec = MakeAllPairs(std::mt19937{GetRandomSeed()}, validator,
-                                 batch_counts, depths, image_sizes, image_sizes,
-                                 depths, filter_sizes, filter_sizes, paddings);
+  std::mt19937 rand_gen{GetRandomSeed()};
+  auto params_vec = MakeAllPairs(rand_gen, validator, batch_counts, depths,
+                                 image_sizes, image_sizes, depths, filter_sizes,
+                                 filter_sizes, paddings, configs);
 
   google::protobuf::RepeatedPtrField<proto::ConvolutionTest> conv_tests;
   for (const auto& params : params_vec) {
-    MakeCallWithTuple([&](int batch_count, int in_depth, int in_height,
-                          int in_width, int out_depth, int filter_height,
-                          int filter_width, Padding padding) {
+    MakeCallWithTuple([&](SizeRange batch_count, SizeRange in_depth,
+                          SizeRange in_height, SizeRange in_width,
+                          SizeRange out_depth, SizeRange filter_height,
+                          SizeRange filter_width, Padding padding,
+                          Config config) {
       proto::ConvolutionTest conv_test;
 
-      *conv_test.mutable_reference() =
-          MakeReference(batch_count, in_depth, in_height, in_width, out_depth,
-                        filter_height, filter_width, padding);
+      *conv_test.mutable_reference() = MakeConvolutionConfig(
+          rand_gen, batch_count, in_depth, in_height, in_width, out_depth,
+          filter_height, filter_width, padding);
 
-      *conv_test.add_test() =
-          MakeConvolution(proto::TENSOR_NCHW, proto::DATA_FLOAT,
-                          proto::DATA_FLOAT, proto::DEFAULT_MATH);
-      *conv_test.add_test() =
-          MakeConvolution(proto::TENSOR_NCHW, proto::DATA_DOUBLE,
-                          proto::DATA_DOUBLE, proto::DEFAULT_MATH);
-      if (DeviceSupportsReducedPrecision()) {
-        *conv_test.add_test() =
-            MakeConvolution(proto::TENSOR_NCHW, proto::DATA_HALF,
-                            proto::DATA_FLOAT, proto::DEFAULT_MATH);
-        *conv_test.add_test() =
-            MakeConvolution(proto::TENSOR_NCHW, proto::DATA_HALF,
-                            proto::DATA_HALF, proto::DEFAULT_MATH);
-      }
-      if (CUDNN_MAJOR >= 7 && DeviceSupportsTensorOpMath()) {
-        *conv_test.add_test() =
-            MakeConvolution(proto::TENSOR_NCHW, proto::DATA_HALF,
-                            proto::DATA_HALF, proto::TENSOR_OP_MATH);
-      }
-      if (CUDNN_MAJOR >= 7) {
-        // Internal error on cudNN 6, see cudnn_tests.textproto.
-        *conv_test.add_test() =
-            MakeConvolution(proto::TENSOR_NHWC, proto::DATA_FLOAT,
-                            proto::DATA_FLOAT, proto::DEFAULT_MATH);
-        if (DeviceSupportsReducedPrecision()) {
-          // Crashes on cuDNN 6, see cudnn_tests.textproto.
-          *conv_test.add_test() =
-              MakeConvolution(proto::TENSOR_NHWC, proto::DATA_HALF,
-                              proto::DATA_FLOAT, proto::DEFAULT_MATH);
-        }
-      }
+      *conv_test.add_test() = MakeConvolutionConfig(config);
 
-      std::ostringstream label;
-      label << "_" << batch_count << 'x' << in_depth << 'x' << in_height << 'x'
-            << in_width << '_' << out_depth << 'x' << in_depth << 'x'
-            << filter_height << 'x' << filter_width << '_'
-            << (padding == Padding::SAME ? "SAME" : "VALID");
+      // Disable tests that are not supported in the current configuration.
+      // Excluding unsupported configs from the parameter vector would make the
+      // supported tests depend on the machine configuration, and that seems
+      // worse than leaving holes in the all-pairs test space on older hardware
+      // and cuDNN versions.
+      string label_prefix = IsConfigSupported(config) ? "" : "DISABLED_";
+      string label_postfix =
+          "_" + conv_test.test(0).label() + "_" + conv_test.reference().label();
 
       // Add convolution_test for each direction.
       for (auto direction :
            {proto::CONVOLUTION_FWD, proto::CONVOLUTION_BWD_DATA,
             proto::CONVOLUTION_BWD_FILTER}) {
         string direction_name = proto::ConvolutionDirection_Name(direction);
-        conv_test.mutable_reference()->set_label(direction_name + label.str());
+        conv_test.mutable_reference()->set_label(label_prefix + direction_name +
+                                                 label_postfix);
 
-        size_t num_summands = 0;
+        auto& input_dim = conv_test.reference().input().dimension();
+        auto& filter_dim = conv_test.reference().filter().dimension();
+        size_t num_summands;
         switch (direction) {
           case proto::CONVOLUTION_FWD:
             conv_test.mutable_reference()->set_fwd_algo(
                 proto::CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM);
-            num_summands = in_depth * filter_height * filter_width;
+            // in_depth * filter_height * filter_width.
+            num_summands = filter_dim[1] * filter_dim[2] * filter_dim[3];
             break;
           case proto::CONVOLUTION_BWD_DATA:
             conv_test.mutable_reference()->set_bwd_data_algo(
                 proto::CONVOLUTION_BWD_DATA_ALGO_1);
-            num_summands = out_depth * filter_height * filter_width;
+            // out_depth * filter_height * filter_width.
+            num_summands = filter_dim[0] * filter_dim[2] * filter_dim[3];
             break;
           case proto::CONVOLUTION_BWD_FILTER:
             conv_test.mutable_reference()->set_bwd_filter_algo(
                 proto::CONVOLUTION_BWD_FILTER_ALGO_1);
-            num_summands = batch_count * in_height * in_width;
+            // batch_count * in_height * in_width.
+            num_summands = input_dim[0] * input_dim[2] * input_dim[3];
             break;
           default:
             LOG(FATAL) << "Invalid direction: " << direction_name;
@@ -755,18 +910,32 @@ INSTANTIATE_TEST_CASE_P(
     ::testing::ValuesIn(GetCudnnTestsFromFile().convolution_test()),
     GetTestName);
 
-INSTANTIATE_TEST_CASE_P(Filter3x3, ConvolutionTest,
-                        ::testing::ValuesIn([] { return MakeTests({3}); }()),
+INSTANTIATE_TEST_CASE_P(Filter3x3, ConvolutionTest, ::testing::ValuesIn([] {
+                          std::vector<SizeRange> filter_sizes{{3, 3}};
+                          return MakeTests(filter_sizes);
+                        }()),
                         GetTestName);
 
-INSTANTIATE_TEST_CASE_P(Filter5x5, ConvolutionTest,
-                        ::testing::ValuesIn([] { return MakeTests({5}); }()),
+INSTANTIATE_TEST_CASE_P(Filter5x5, ConvolutionTest, ::testing::ValuesIn([] {
+                          std::vector<SizeRange> filter_sizes{{5, 5}};
+                          return MakeTests(filter_sizes);
+                        }()),
                         GetTestName);
 
-INSTANTIATE_TEST_CASE_P(
-    FilterOther, ConvolutionTest, ::testing::ValuesIn([] {
-      return MakeTests({1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14});
-    }()),
-    GetTestName);
+INSTANTIATE_TEST_CASE_P(FilterOther, ConvolutionTest, ::testing::ValuesIn([] {
+                          std::vector<SizeRange> filter_sizes;
+                          for (int size : {1, 2, 4, 8, 16}) {
+                            filter_sizes.push_back(MakePowerOfTwoRange(size));
+                          }
+                          return MakeTests(filter_sizes);
+                        }()),
+                        GetTestName);
 }  // namespace
+
+// Make gtest print the proto as text (instead of raw data) when a test fails.
+namespace proto {
+::std::ostream& operator<<(::std::ostream& ostr, const ConvolutionTest& proto) {
+  return ostr << "\n" << proto.DebugString();
+}
+}  // namespace proto
 }  // namespace nvidia_libs_test

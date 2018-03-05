@@ -101,10 +101,9 @@ TEST(ConvolutionTest, GetWorkspaceSize_Overflow) {
   }
   auto convolution = CreateConvolutionDescriptor(conv_desc);
 
-  auto output_or =
-      CreateOutputDescriptor(proto::TENSOR_NCHW, input, filter, convolution);
-  ASSERT_TRUE(IsOk(output_or));
-  auto output = std::move(output_or.ValueOrDie());
+  ASSERT_OK_AND_ASSIGN(
+      auto output,
+      CreateOutputDescriptor(proto::TENSOR_NCHW, input, filter, convolution));
 
   size_t workspace_size = 0;
   auto status = cudnnGetConvolutionForwardWorkspaceSize(

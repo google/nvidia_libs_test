@@ -62,8 +62,6 @@ using ConvolutionDescriptor =
 using ConvolutionAlgo =
     mpark::variant<cudnnConvolutionFwdAlgo_t, cudnnConvolutionBwdDataAlgo_t,
                   cudnnConvolutionBwdFilterAlgo_t>;
-// Note: ADL fails outside of nvidia_libs_test (for example in ::testing).
-std::ostream& operator<<(std::ostream& str, const ConvolutionAlgo& algo);
 
 // Creates a cuDNN handle.
 CudnnHandle CreateCudnnHandle();
@@ -230,4 +228,19 @@ StatusOr<Convolution> CreateConvolution(const proto::ConvolutionConfig& proto,
                                         const RandomGenerator& rand_gen);
 
 }  // namespace nvidia_libs_test
+
+// This operator<< is in the global namespace in order to be found by ADL.
+// That's important so it can be called from any namespace, not just the
+// namespace it was declared in.
+//
+// ConvolutionAlgo is an instantiation of the mpark::variant template class with
+// types from the global namespace (::cudnnConvolutionFwdAlgo_t etc.). The fact
+// that the typedef is in the nvidia_libs_test namespace is irrelevant for ADL.
+// It's undefined behavior to overload functions in the std namespace, and the
+// same should apply for the namespace of the C++17 std::variant implementation
+// used here. We are therefore left with implementing this function in the
+// global namespace (the namespace of the template arguments).
+std::ostream& operator<<(std::ostream& str,
+                         const nvidia_libs_test::ConvolutionAlgo& algo);
+
 #endif  // NVIDIA_LIBS_TEST_CUDNN_UTIL_H_

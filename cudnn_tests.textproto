@@ -6,9 +6,9 @@
 # (after successfully calling GetWorkspaceSize) is unexpected:
 #
 # cuDNN 6.0.21 fails to run the convolution with STATUS_INTERNAL_ERROR.
+# cuDNN 7.0.5 fails to run the convolution with STATUS_NOT_SUPPORTED.
 #
-# cuDNN 7.0.5 fails to run the convolution with STATUS_NOT_SUPPORTED or
-# STATUS_ARCH_MISMATCH.
+# See nvbugs/2071663.
 convolution_test {
   reference {
     input {
@@ -39,6 +39,8 @@ convolution_test {
 
 # This FLOAT_CONFIG in NHWC format fails with STATUS_INTERNAL_ERROR on cuDNN
 # 6.0.21. Fixed in cuDNN 7.
+#
+# See nvbugs/2071665.
 convolution_test {
   reference {
     input {
@@ -69,6 +71,8 @@ convolution_test {
 
 # This PSEUDO_HALF_CONFIG in NHWC format crashes in GetWorkspaceSize on cuDNN
 # 6.0.21. Fixed in cuDNN 7.
+#
+# See nvbugs/2071668.
 convolution_test {
   reference {
     input {
@@ -95,6 +99,122 @@ convolution_test {
     fwd_algo: CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM
     # Disabled to prevent crashing on normal runs.
     label: "DISABLED_NHWC_PSUEDO_HALF_CONFIG_Crash"
+  }
+}
+
+# This DOUBLE_CONFIG in NCHW format seems to produce incorrect results for
+# CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING. Tested with cuDNN 7.0.5.
+#
+# See nvbugs/2072856.
+convolution_test {
+  reference {
+    input {
+      dimension: 1025
+      dimension: 64
+      dimension: 7
+      dimension: 33
+      format: TENSOR_NCHW
+      data_type: DATA_DOUBLE
+    }
+    filter {
+      dimension: 96
+      dimension: 64
+      dimension: 7
+      dimension: 11
+      format: TENSOR_NCHW
+      data_type: DATA_DOUBLE
+    }
+    convolution {
+      pad: 0
+      pad: 0
+      compute_mode: DATA_DOUBLE
+    }
+    bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_1
+    label: "CONVOLUTION_BWD_FILTER_1025x64x7x33_96x64x7x11_VALID_Incorrect"
+  }
+  test {
+    bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING
+  }
+}
+
+# This DOUBLE_CONFIG in NCHW format fails with STATUS_EXECUTION_FAILED on
+# cuDNN 7.1.1, tested with V100-SXM2.
+#
+# See nvbugs/2072858.
+convolution_test {
+  reference {
+    input {
+      dimension: 29
+      dimension: 2
+      dimension: 864
+      dimension: 1556
+      format: TENSOR_NCHW
+      data_type: DATA_DOUBLE
+    }
+    filter {
+      dimension: 2
+      dimension: 2
+      dimension: 3
+      dimension: 3
+      format: TENSOR_NCHW
+      data_type: DATA_DOUBLE
+    }
+    convolution {
+      pad: 1
+      pad: 1
+      compute_mode: DATA_DOUBLE
+    }
+    bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_1
+    label: "CONVOLUTION_BWD_FILTER_NCHW_TRUE_HALF_29x2x864x1556_2x2x3x3_SAME_Fails"
+  }
+}
+
+# This TENSOR_OP_CONFIG in NCHW format returns some algorithms multiple times
+# from cudnnGetConvolutionForwardAlgorithm_v7. Presumably once for DEFAULT_MATH
+# and once for TENSOR_OP_MATH.
+#
+# See nvbugs/2072859.
+convolution_test {
+  reference {
+    input {
+      dimension: 52
+      dimension: 7
+      dimension: 112
+      dimension: 4
+      data_type: DATA_DOUBLE
+      format: TENSOR_NCHW
+    }
+    filter {
+      dimension: 873
+      dimension: 7
+      dimension: 3
+      dimension: 3
+      data_type: DATA_DOUBLE
+      format: TENSOR_NCHW
+    }
+    convolution {
+      pad: 0
+      pad: 0
+      compute_mode: DATA_DOUBLE
+    }
+    fwd_algo: CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM
+    label: "CONVOLUTION_FWD_NCHW_TENSOR_OP_52x7x112x4_873x7x3x3_VALID_GetAlgo_v7"
+  }
+  test {
+    input {
+      data_type: DATA_HALF
+      format: TENSOR_NCHW
+    }
+    filter {
+      data_type: DATA_HALF
+      format: TENSOR_NCHW
+    }
+    convolution {
+      compute_mode: DATA_HALF
+      math_type: TENSOR_OP_MATH
+    }
+    all_algos: CONVOLUTION_FWD
+    label: "NCHW_TENSOR_OP"
   }
 }
 

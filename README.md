@@ -23,7 +23,7 @@ Bazel parameters:
 *   `-c opt` Build with optimizations. Recommended for benchmarks.
 
 *   `--action_env=CUDA_PATH=<path>`: Path to the CUDA SDK directory. Default is
-    `/usr/loca/cuda`.
+    `/usr/local/cuda`.
 
 *   `--action_env=CUDNN_PATH=<path>`: Path to the CUDNN SDK directory. Default
     is `CUDA_PATH`.
@@ -41,6 +41,12 @@ Executable parameters:
 
 `bazel run [bazel parameters] //:cudnn_test -- [test parameters]`
 
+Bazel can run tests in a sandbox (which allows reporting crashes as failures).
+To run in a sandbox, replace 'bazel run ...' with 'bazel test ...' and prefix
+each test parameter with '--test_arg='
+
+`bazel test [bazel parameters] //:cudnn_test --test_arg=[test parameter 1] ...`
+
 Test parameters:
 
 *   `--gtest_filter=<pattern>`: Only run tests that match the given pattern.
@@ -52,6 +58,9 @@ Test parameters:
 *   `--gtest_random_seed=<value>`: Seed for random generator. Changing the value
     produces tests with a different mix of tensor shapes, filter sizes, etc.
     Default is 0.
+
+*   `--gtest_also_run_disabled_tests`: Include disabled tests (i.e. tests with
+    names that start with `DISABLED_`).
 
 *   `--help` for more options.
 

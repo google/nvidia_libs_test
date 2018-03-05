@@ -31,7 +31,6 @@
 // that status from the current function or exit the program respectively.
 
 namespace nvidia_libs_test {
-
 using string = std::string;
 
 // Status object representing that an operation was successful, or otherwise
@@ -114,6 +113,17 @@ class StatusOr {
                      << #expr << "'";                                    \
     }                                                                    \
   } while (false)
+
+#define CONCAT(left, right) CONCAT_IMPL(left, right)
+#define CONCAT_IMPL(left, right) left##right
+
+#define ASSIGN_OR_RETURN_STATUS(lhs, expr) \
+  ASSIGN_OR_RETURN_STATUS_IMPL(CONCAT(_status_or_, __COUNTER__), lhs, expr)
+
+#define ASSIGN_OR_RETURN_STATUS_IMPL(status_or, lhs, expr) \
+  auto status_or = expr;                                   \
+  RETURN_IF_ERROR_STATUS(status_or.status());              \
+  lhs = std::move(status_or.ValueOrDie())
 
 // Exits the program if 'expr' returns an error status.
 #define CHECK_OK_STATUS(expr) CHECK_EQ(OkStatus(), expr)

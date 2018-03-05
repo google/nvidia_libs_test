@@ -50,6 +50,15 @@ template <typename T>
 ::testing::AssertionResult IsOk(const StatusOr<T>& status_or) {
   return IsOk(status_or.status());
 }
+
+#define ASSERT_OK_AND_ASSIGN(lhs, expr) \
+  ASSERT_OK_AND_ASSIGN_IMPL(CONCAT(_status_or_, __COUNTER__), lhs, expr)
+
+#define ASSERT_OK_AND_ASSIGN_IMPL(status_or, lhs, expr) \
+  auto status_or = expr;                                \
+  ASSERT_TRUE(IsOk(status_or));                         \
+  lhs = std::move(status_or.ValueOrDie())
+
 }  // namespace nvidia_libs_test
 
 #endif  // NVIDIA_LIBS_TEST_TEST_UTIL_H_
