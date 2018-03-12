@@ -18,7 +18,8 @@ def _impl(repository_ctx):
   repository_ctx.file("nvcc.sh", """
 #! /bin/bash
 repo_path=%s
-$repo_path/cuda/bin/nvcc --compiler-options -fPIC --include-path $repo_path $*
+compiler=${CC:+"--compiler-bindir=$CC"}
+$repo_path/cuda/bin/nvcc $compiler --compiler-options=-fPIC --include-path=$repo_path $*
 """ % repository_ctx.path("."))
 
   repository_ctx.file("BUILD", """

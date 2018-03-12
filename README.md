@@ -28,6 +28,9 @@ Bazel parameters:
 *   `--action_env=CUDNN_PATH=<path>`: Path to the CUDNN SDK directory. Default
     is `CUDA_PATH`.
 
+*   `--action_env=CC=<compiler>`: Name of (or path to) the compiler. Examples:
+    `clang`, `gcc-6`.
+
 Executable parameters:
 
 *   `--cuda_device=<device_id>`: CUDA device to use. Default is 0.

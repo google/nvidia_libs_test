@@ -6,9 +6,12 @@
 # (after successfully calling GetWorkspaceSize) is unexpected:
 #
 # cuDNN 6.0.21 fails to run the convolution with STATUS_INTERNAL_ERROR.
-# cuDNN 7.0.5 fails to run the convolution with STATUS_NOT_SUPPORTED.
 #
 # See nvbugs/2071663.
+#
+# cuDNN 7.0.5 fails to run the convolution with STATUS_NOT_SUPPORTED.
+#
+# See nvbugs/2082072.
 convolution_test {
   reference {
     input {
@@ -140,7 +143,15 @@ convolution_test {
 # This DOUBLE_CONFIG in NCHW format fails with STATUS_EXECUTION_FAILED on
 # cuDNN 7.1.1, tested with V100-SXM2.
 #
+# The next cuDNN release is expected to return STATUS_NOT_SUPPORTED instead.
+#
 # See nvbugs/2072858.
+#
+# Ideally, cudnnGetWorkspaceSize would already return STATUS_NOT_SUPPORTED,
+# but NVIDIA says that will take a while to fix. They will mention this
+# limitation in the documentation of the next release.
+#
+# See nvbugs/2082072.
 convolution_test {
   reference {
     input {
@@ -169,11 +180,14 @@ convolution_test {
   }
 }
 
-# This TENSOR_OP_CONFIG in NCHW format returns some algorithms multiple times
-# from cudnnGetConvolutionForwardAlgorithm_v7. Presumably once for DEFAULT_MATH
-# and once for TENSOR_OP_MATH.
+# This TENSOR_OP_CONFIG in NCHW format returns some algorithms twice from
+# cudnnGetConvolutionForwardAlgorithm_v7, once for DEFAULT_MATH and once for
+# TENSOR_OP_MATH. I wasn't aware that a mathType member was added to
+# cudnnConvolution*AlgoPerf_t in cuDNN 7 to distinguish the two cases. So
+# cuDNN works as intended, and the ConvolutionTest.GetAlgorithm_v7 test now
+# handles it correctly.
 #
-# See nvbugs/2072859.
+# See nvbugs/2072859, works as intended.
 convolution_test {
   reference {
     input {

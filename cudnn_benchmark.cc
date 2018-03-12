@@ -1,18 +1,18 @@
 /*
-     * Copyright 2018 Google LLC
-     *
-     * Licensed under the Apache License, Version 2.0 (the "License");
-     * you may not use this file except in compliance with the License.
-     * You may obtain a copy of the License at
-     *
-     *     https://www.apache.org/licenses/LICENSE-2.0
-     *
-     * Unless required by applicable law or agreed to in writing, software
-     * distributed under the License is distributed on an "AS IS" BASIS,
-     * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-     * See the License for the specific language governing permissions and
-     * limitations under the License.
-     */
+ * Copyright 2018 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 // Runs a suite of cuDNN benchmarks, from cudnn_benchmarks.textproto and from
 // instances generated in this file. Benchmark time is measured in GPU kernel
@@ -26,8 +26,9 @@
 //
 #include <algorithm>
 
-#include "base/commandlineflags.h"
 #include "gflags/gflags.h"
+#include "ostream_nullptr.h"
+#include "glog/logging.h"
 #include "ostream_nullptr.h"
 #include "glog/logging.h"
 #include "google/protobuf/repeated_field.h"
@@ -398,11 +399,12 @@ void RegisterBenchmarks() {
 }  // namespace nvidia_libs_test
 
 int main(int argc, char** argv) {
-  // Init benchmarks first. Both consume recognized flags, but only InitGoogle
-  // reports an error if a flag is not recognized.
+  // Initialize benchmarks before parsing flags. Both consume recognized flags,
+  // but only the latter reports an error if a flag is not recognized.
   benchmark::Initialize(&argc, argv);
+  // Parse flags before initializing logging, otherwise logs are not printed.
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
   google::InitGoogleLogging(argv[0]);
-gflags::ParseCommandLineFlags(&argc, &argv, true);
   if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
     return 1;
   }

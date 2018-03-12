@@ -1,18 +1,18 @@
 /*
-     * Copyright 2018 Google LLC
-     *
-     * Licensed under the Apache License, Version 2.0 (the "License");
-     * you may not use this file except in compliance with the License.
-     * You may obtain a copy of the License at
-     *
-     *     https://www.apache.org/licenses/LICENSE-2.0
-     *
-     * Unless required by applicable law or agreed to in writing, software
-     * distributed under the License is distributed on an "AS IS" BASIS,
-     * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-     * See the License for the specific language governing permissions and
-     * limitations under the License.
-     */
+ * Copyright 2018 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include <algorithm>
 #include <cstddef>
@@ -408,8 +408,18 @@ TEST_P(ConvolutionTest, CompareResults) {
             << "\nalgo: " << algo;
         return oss.str();
       };
-      ASSERT_TRUE(IsOk(RunConvolution(alpha, beta, handle, test, algo)))
-          << get_message();
+      Status status = RunConvolution(alpha, beta, handle, test, algo);
+      // Some convolution configs successfully return a workspace size (or
+      // return from cudnnGetConvolution*Algorithm_v7 with success status) but
+      // then fail to run, see nvbugs/2082072. Instead of triggering test
+      // failures we just skip configurations that hit this bug. A targeted test
+      // (for 'reference' instead of 'test') is in cudnn_tests.textproto.
+      if (!status.ok() &&
+          status.message().find("CUDNN_STATUS_NOT_SUPPORTED") != string::npos) {
+        continue;
+      }
+      ASSERT_TRUE(IsOk(status)) << get_message();
+
       // Check that the test result matches the reference result. This also
       // compares buffer elements not referenced by the tensor.
       double tolerance = tolerance_scale * GetTolerance(algo);
@@ -421,20 +431,42 @@ TEST_P(ConvolutionTest, CompareResults) {
 }
 
 #if CUDNN_MAJOR >= 7
+struct ConvolutionAlgoAndMathType {
+  ConvolutionAlgo algo;
+  cudnnMathType_t math_type;
+};
+bool operator<(const ConvolutionAlgoAndMathType& left,
+               const ConvolutionAlgoAndMathType& right) {
+  if (left.algo == right.algo) {
+    return left.math_type < right.math_type;
+  }
+  return left.algo < right.algo;
+}
+bool operator==(const ConvolutionAlgoAndMathType& left,
+                const ConvolutionAlgoAndMathType& right) {
+  return left.algo == right.algo && left.math_type == right.math_type;
+}
+
 template <typename T>
-std::vector<ConvolutionAlgo> ToConvolutionAlgos(std::vector<T> algo_perfs,
-                                                int num_algorithms) {
+std::vector<ConvolutionAlgoAndMathType> ToConvolutionAlgos(
+    std::vector<T> algo_perfs, int num_algorithms) {
+  // cudnnGetConvolution*Algorithm_v7 also returns elements with non-success
+  // status. Filter them out here.
   auto end =
       std::remove_if(algo_perfs.begin(), algo_perfs.begin() + num_algorithms,
                      [](const T& algo_perf) {
                        return algo_perf.status != CUDNN_STATUS_SUCCESS;
                      });
-  std::vector<ConvolutionAlgo> result;
+  std::vector<ConvolutionAlgoAndMathType> result;
   std::transform(algo_perfs.begin(), end, std::back_inserter(result),
-                 [](const T& algo_perf) { return algo_perf.algo; });
+                 [](const T& algo_perf) -> ConvolutionAlgoAndMathType {
+                   return {algo_perf.algo, algo_perf.mathType};
+                 });
   return result;
 }
 
+// Compare the list of algorithms returned from GetSupportedConvolutionAlgos
+// with the result from cudnnGetConvolution*Algorithm_v7.
 TEST_P(ConvolutionTest, GetAlgorithm_v7) {
   CudnnHandle handle = CreateCudnnHandle();
 
@@ -454,12 +486,13 @@ TEST_P(ConvolutionTest, GetAlgorithm_v7) {
     ASSERT_OK_AND_ASSIGN(
         auto output, CreateOutputDescriptor(proto, input, filter, convolution));
 
-    std::vector<ConvolutionAlgo> get_v7_algos;
+    std::vector<ConvolutionAlgoAndMathType> get_v7_algos;
     int num_algorithms = 0;
     switch (direction) {
       case proto::CONVOLUTION_FWD: {
-        std::vector<cudnnConvolutionFwdAlgoPerf_t> algo_perfs(
-            CUDNN_CONVOLUTION_FWD_ALGO_COUNT);
+        ASSERT_TRUE(IsOk(GetStatus(cudnnGetConvolutionForwardAlgorithmMaxCount(
+            handle.get(), &num_algorithms))));
+        std::vector<cudnnConvolutionFwdAlgoPerf_t> algo_perfs(num_algorithms);
         ASSERT_TRUE(IsOk(GetStatus(cudnnGetConvolutionForwardAlgorithm_v7(
             handle.get(), input.get(), filter.get(), convolution.get(),
             output.get(), algo_perfs.size(), &num_algorithms,
@@ -467,8 +500,11 @@ TEST_P(ConvolutionTest, GetAlgorithm_v7) {
         get_v7_algos = ToConvolutionAlgos(algo_perfs, num_algorithms);
       } break;
       case proto::CONVOLUTION_BWD_DATA: {
+        ASSERT_TRUE(
+            IsOk(GetStatus(cudnnGetConvolutionBackwardDataAlgorithmMaxCount(
+                handle.get(), &num_algorithms))));
         std::vector<cudnnConvolutionBwdDataAlgoPerf_t> algo_perfs(
-            CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT);
+            num_algorithms);
         ASSERT_TRUE(IsOk(GetStatus(cudnnGetConvolutionBackwardDataAlgorithm_v7(
             handle.get(), filter.get(), output.get(), convolution.get(),
             input.get(), algo_perfs.size(), &num_algorithms,
@@ -476,8 +512,11 @@ TEST_P(ConvolutionTest, GetAlgorithm_v7) {
         get_v7_algos = ToConvolutionAlgos(algo_perfs, num_algorithms);
       } break;
       case proto::CONVOLUTION_BWD_FILTER: {
+        ASSERT_TRUE(
+            IsOk(GetStatus(cudnnGetConvolutionBackwardFilterAlgorithmMaxCount(
+                handle.get(), &num_algorithms))));
         std::vector<cudnnConvolutionBwdFilterAlgoPerf_t> algo_perfs(
-            CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT);
+            num_algorithms);
         ASSERT_TRUE(
             IsOk(GetStatus(cudnnGetConvolutionBackwardFilterAlgorithm_v7(
                 handle.get(), input.get(), output.get(), convolution.get(),
@@ -490,9 +529,29 @@ TEST_P(ConvolutionTest, GetAlgorithm_v7) {
                    << proto::ConvolutionDirection_Name(direction);
     }
 
-    auto get_supported_algos = GetSupportedConvolutionAlgos(
-        handle, direction, input, filter, convolution, output,
-        std::numeric_limits<size_t>::max());
+    std::vector<ConvolutionAlgoAndMathType> get_supported_algos;
+    auto add_supported_algos = [&](cudnnMathType_t math_type) {
+      CHECK_OK_STATUS(
+          GetStatus(cudnnSetConvolutionMathType(convolution.get(), math_type)));
+      auto algos = GetSupportedConvolutionAlgos(
+          handle, direction, input, filter, convolution, output,
+          std::numeric_limits<size_t>::max());
+      std::transform(algos.begin(), algos.end(),
+                     std::back_inserter(get_supported_algos),
+                     [&](const ConvolutionAlgo& algo) {
+                       return ConvolutionAlgoAndMathType{algo, math_type};
+                     });
+    };
+
+    // Unlike GetSupportedConvolutionAlgos, cudnnGetConvolution*Algorithm_v7
+    // also returns algo_perfs with DEFAULT_MATH if the convolution specifies
+    // TENSOR_OP_MATH. If this is the case, get supported algorithms for both
+    // math types.
+    auto math_type = proto.convolution().math_type();
+    add_supported_algos(static_cast<cudnnMathType_t>(math_type));
+    if (math_type == proto::TENSOR_OP_MATH) {
+      add_supported_algos(CUDNN_DEFAULT_MATH);
+    }
 
     std::sort(get_supported_algos.begin(), get_supported_algos.end());
     std::sort(get_v7_algos.begin(), get_v7_algos.end());

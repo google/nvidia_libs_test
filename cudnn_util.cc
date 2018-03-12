@@ -1,24 +1,24 @@
 /*
-     * Copyright 2018 Google LLC
-     *
-     * Licensed under the Apache License, Version 2.0 (the "License");
-     * you may not use this file except in compliance with the License.
-     * You may obtain a copy of the License at
-     *
-     *     https://www.apache.org/licenses/LICENSE-2.0
-     *
-     * Unless required by applicable law or agreed to in writing, software
-     * distributed under the License is distributed on an "AS IS" BASIS,
-     * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-     * See the License for the specific language governing permissions and
-     * limitations under the License.
-     */
+ * Copyright 2018 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include "cudnn_util.h"
 
 #include <sstream>
 
-#include "base/commandlineflags.h"
+#include "gflags/gflags.h"
 #include "base/googleinit.h"
 #include "cuda_util.h"
 
@@ -31,9 +31,9 @@ DEFINE_int32(device_memory_limit_mb, 4096,
 namespace nvidia_libs_test {
 namespace {
 size_t device_memory_limit_bytes = 0;
-}  // namespace
 
-REGISTER_MODULE_INITIALIZER(cudnn_util, {
+// Flag validator that initializes device_memory_limit_bytes.
+bool ValidateDeviceMemoryLimit(const char*, int device_memory_limit_mb) {
   int device_id = FLAGS_cuda_device;
   int device_count = 0;
   CHECK_OK_STATUS(GetStatus(cudaGetDeviceCount(&device_count)));
@@ -42,7 +42,7 @@ REGISTER_MODULE_INITIALIZER(cudnn_util, {
   size_t free_bytes = 0;
   size_t total_bytes = 0;
   CHECK_OK_STATUS(GetStatus(cudaMemGetInfo(&free_bytes, &total_bytes)));
-  auto limit_bytes = static_cast<ptrdiff_t>(FLAGS_device_memory_limit_mb) << 20;
+  auto limit_bytes = static_cast<ptrdiff_t>(device_memory_limit_mb) << 20;
   CHECK_GE(free_bytes, std::abs(limit_bytes))
       << "Available device memory is smaller than specified limit.";
   if (limit_bytes < 0) {
@@ -52,20 +52,33 @@ REGISTER_MODULE_INITIALIZER(cudnn_util, {
     // Use flag value.
     device_memory_limit_bytes = limit_bytes;
   }
-  cudaDeviceProp device_prop;
-  CHECK_OK_STATUS(GetStatus(cudaGetDeviceProperties(&device_prop, device_id)));
-  auto get_version_string = [](size_t version) {
-    std::ostringstream oss;
-    oss << version / 1000;
-    version %= 1000;
-    oss << "." << version / 100;
-    version %= 100;
-    oss << "." << version;
-    return oss.str();
-  };
-  LOG(INFO) << "Running cuDNN v" << get_version_string(cudnnGetVersion())
-            << " for CUDA " << get_version_string(cudnnGetCudartVersion())
-            << " on " << device_prop.name;
+  static bool result = [&] {
+    cudaDeviceProp device_prop;
+    CHECK_OK_STATUS(
+        GetStatus(cudaGetDeviceProperties(&device_prop, device_id)));
+    auto get_version_string = [](size_t version) {
+      std::ostringstream oss;
+      oss << version / 1000;
+      version %= 1000;
+      oss << "." << version / 100;
+      version %= 100;
+      oss << "." << version;
+      return oss.str();
+    };
+    LOG(INFO) << "Running cuDNN v" << get_version_string(cudnnGetVersion())
+              << " for CUDA " << get_version_string(cudnnGetCudartVersion())
+              << " on " << device_prop.name;
+    return true;
+  }();
+  return result;
+}
+}  // namespace
+
+REGISTER_MODULE_INITIALIZER(cudnn_util, {
+  // This runs during static initialization, before flags are parsed. Register
+  // the validator to be called during gflags::ParseCommandLineFlags().
+  gflags::RegisterFlagValidator(&FLAGS_device_memory_limit_mb,
+                                &ValidateDeviceMemoryLimit);
 });
 
 Status GetStatus(cudnnStatus_t status) {
@@ -132,6 +145,7 @@ TensorDescriptor CreateTensorDescriptor(proto::TensorDescriptor proto) {
   return result;
 }
 
+namespace {
 struct TensorDescriptorData {
   cudnnDataType_t data_type;
   int rank;
@@ -155,6 +169,7 @@ TensorDescriptorData GetTensorDescriptorData(
                                  &data.rank, data.dimensions, data.strides)));
   return data;
 }
+}  // namespace
 
 bool TensorDescriptorEqual(const TensorDescriptor& left,
                            const TensorDescriptor& right) {
@@ -217,6 +232,7 @@ FilterDescriptor CreateFilterDescriptor(const proto::FilterDescriptor& proto) {
   return FilterDescriptor{result};
 }
 
+namespace {
 struct FilterDescriptorData {
   cudnnDataType_t data_type;
   cudnnTensorFormat_t format;
@@ -239,6 +255,7 @@ FilterDescriptorData GetFilterDescriptorData(cudnnFilterDescriptor_t filter) {
                                  &data.format, &data.rank, data.dimensions)));
   return data;
 }
+}  // namespace
 
 bool FilterDescriptorEqual(const FilterDescriptor& left,
                            const FilterDescriptor& right) {
@@ -302,6 +319,14 @@ ConvolutionDescriptor CreateConvolutionDescriptor(
   return ConvolutionDescriptor{result};
 }
 
+namespace {
+#if CUDNN_MAJOR < 7
+// Forward-compatible math type added in cuDNN 7.
+typedef enum {
+  CUDNN_DEFAULT_MATH = 0,
+} cudnnMathType_t;
+#endif
+
 struct ConvolutionDescriptorData {
   int rank;
   int pad[CUDNN_DIM_MAX];
@@ -309,6 +334,8 @@ struct ConvolutionDescriptorData {
   int dilation[CUDNN_DIM_MAX];
   cudnnConvolutionMode_t convolution_mode;
   cudnnDataType_t compute_type;
+  cudnnMathType_t math_type;
+  int group_count;
 };
 
 bool operator==(const ConvolutionDescriptorData& left,
@@ -330,8 +357,15 @@ ConvolutionDescriptorData GetConvolutionDescriptorData(
   CHECK_OK_STATUS(GetStatus(cudnnGetConvolutionNdDescriptor(
       convolution.get(), array_length, &data.rank, data.pad, data.stride,
       data.dilation, &data.convolution_mode, &data.compute_type)));
+#if CUDNN_MAJOR >= 7
+  CHECK_OK_STATUS(GetStatus(
+      cudnnGetConvolutionMathType(convolution.get(), &data.math_type)));
+  CHECK_OK_STATUS(GetStatus(
+      cudnnGetConvolutionGroupCount(convolution.get(), &data.group_count)));
+#endif
   return data;
 }
+}  // namespace
 
 bool ConvolutionDescriptorEqual(const ConvolutionDescriptor& left,
                                 const ConvolutionDescriptor& right) {
@@ -410,8 +444,8 @@ std::vector<ConvolutionAlgo> GetSupportedConvolutionAlgosImpl(
     const CudnnHandle& handle, const TensorDescriptor& input,
     const FilterDescriptor& filter, const ConvolutionDescriptor& convolution,
     const TensorDescriptor& output, size_t workspace_limit, int num_elements) {
-  // Use backwards-compatible way to get the list of algorithms which
-  // cudnnGetConvolution*Algorithm_v7 would return.
+  // See discussion in the ConvolutionTest.GetAlgorithm_v7 test how this
+  // function differs from cudnnGetConvolution*Algorithm_v7.
   std::vector<ConvolutionAlgo> result;
   for (int i = 0; i < num_elements; ++i) {
     auto algo = static_cast<T>(i);

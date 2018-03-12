@@ -127,7 +127,7 @@ cc_test(
         ":cudnn_util",
         ":glog",
         "@com_google_absl//absl/types:optional",
-        "@com_google_googletest//:gtest_main",
+        "@com_google_googletest//:gtest",
         "@com_google_protobuf//:protobuf_lite",
         "@local_config_cuda//:cuda_headers",
     ],
