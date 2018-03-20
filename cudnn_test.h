@@ -17,12 +17,15 @@
 #ifndef NVIDIA_LIBS_TEST_CUDNN_TEST_H_
 #define NVIDIA_LIBS_TEST_CUDNN_TEST_H_
 
+#include <ostream>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "gflags/gflags.h"
 #include "ostream_nullptr.h"
 #include "glog/logging.h"
+#include "google/protobuf/message.h"
 #include "gtest/gtest.h"
 #include "cuda_util.h"
 #include "cudnn_util.h"
@@ -43,5 +46,15 @@ proto::Tests GetCudnnTestsFromFile();
 enum class Padding { SAME, VALID };
 
 std::ostream& operator<<(std::ostream& ostr, Padding padding);
+namespace proto {
+// Make gtest print protos as text (instead of raw data).
+template <typename T>
+typename std::enable_if<
+    std::is_convertible<T*, ::google::protobuf::Message*>::value,
+    ::std::ostream&>::type
+operator<<(::std::ostream& ostr, const T& proto) {
+  return ostr << "\n" << proto.DebugString();
+}
+}  // namespace proto
 }  // namespace nvidia_libs_test
 #endif  // NVIDIA_LIBS_TEST_CUDNN_TEST_H_

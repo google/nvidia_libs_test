@@ -446,6 +446,13 @@ bool operator==(const ConvolutionAlgoAndMathType& left,
                 const ConvolutionAlgoAndMathType& right) {
   return left.algo == right.algo && left.math_type == right.math_type;
 }
+::std::ostream& operator<<(
+    ::std::ostream& ostr,
+    const ConvolutionAlgoAndMathType& algo_and_math_type) {
+  return ostr << "\nalgo: " << algo_and_math_type.algo << " math_type: "
+              << proto::MathType_Name(static_cast<proto::MathType>(
+                     algo_and_math_type.math_type));
+}
 
 template <typename T>
 std::vector<ConvolutionAlgoAndMathType> ToConvolutionAlgos(
@@ -990,11 +997,4 @@ INSTANTIATE_TEST_CASE_P(FilterOther, ConvolutionTest, ::testing::ValuesIn([] {
                         }()),
                         GetTestName);
 }  // namespace
-
-// Make gtest print the proto as text (instead of raw data) when a test fails.
-namespace proto {
-::std::ostream& operator<<(::std::ostream& ostr, const ConvolutionTest& proto) {
-  return ostr << "\n" << proto.DebugString();
-}
-}  // namespace proto
 }  // namespace nvidia_libs_test

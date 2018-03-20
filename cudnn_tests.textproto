@@ -266,3 +266,44 @@ convolution_test {
   }
 }
 
+# Basic grouped convolution test.
+convolution_test {
+  reference {
+    input {
+      dimension: 1
+      dimension: 10  # = filter_in_depth * group_count
+      dimension: 13
+      dimension: 13
+      format: TENSOR_NCHW
+      data_type: DATA_FLOAT
+    }
+    filter {
+      dimension: 35  # = depth_multiplier * group_count
+      dimension: 2
+      dimension: 3
+      dimension: 3
+      format: TENSOR_NCHW
+      data_type: DATA_FLOAT
+    }
+    output {
+      dimension: 1
+      dimension: 35  # = filter_out_depth
+      dimension: 13
+      dimension: 13
+      format: TENSOR_NCHW
+      data_type: DATA_FLOAT
+    }
+    convolution {
+      pad: 1
+      pad: 1
+      compute_mode: DATA_FLOAT
+      group_count: 5
+    }
+    fwd_algo: CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM
+    label: "GroupedConvolution"
+  }
+  test {
+    all_algos: CONVOLUTION_FWD
+  }
+}
+
