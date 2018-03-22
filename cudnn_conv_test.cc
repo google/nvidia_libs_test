@@ -431,32 +431,9 @@ TEST_P(ConvolutionTest, CompareResults) {
 }
 
 #if CUDNN_MAJOR >= 7
-struct ConvolutionAlgoAndMathType {
-  ConvolutionAlgo algo;
-  cudnnMathType_t math_type;
-};
-bool operator<(const ConvolutionAlgoAndMathType& left,
-               const ConvolutionAlgoAndMathType& right) {
-  if (left.algo == right.algo) {
-    return left.math_type < right.math_type;
-  }
-  return left.algo < right.algo;
-}
-bool operator==(const ConvolutionAlgoAndMathType& left,
-                const ConvolutionAlgoAndMathType& right) {
-  return left.algo == right.algo && left.math_type == right.math_type;
-}
-::std::ostream& operator<<(
-    ::std::ostream& ostr,
-    const ConvolutionAlgoAndMathType& algo_and_math_type) {
-  return ostr << "\nalgo: " << algo_and_math_type.algo << " math_type: "
-              << proto::MathType_Name(static_cast<proto::MathType>(
-                     algo_and_math_type.math_type));
-}
-
 template <typename T>
-std::vector<ConvolutionAlgoAndMathType> ToConvolutionAlgos(
-    std::vector<T> algo_perfs, int num_algorithms) {
+std::vector<ConvolutionAlgo> ToConvolutionAlgos(std::vector<T> algo_perfs,
+                                                int num_algorithms) {
   // cudnnGetConvolution*Algorithm_v7 also returns elements with non-success
   // status. Filter them out here.
   auto end =
@@ -464,11 +441,9 @@ std::vector<ConvolutionAlgoAndMathType> ToConvolutionAlgos(
                      [](const T& algo_perf) {
                        return algo_perf.status != CUDNN_STATUS_SUCCESS;
                      });
-  std::vector<ConvolutionAlgoAndMathType> result;
+  std::vector<ConvolutionAlgo> result;
   std::transform(algo_perfs.begin(), end, std::back_inserter(result),
-                 [](const T& algo_perf) -> ConvolutionAlgoAndMathType {
-                   return {algo_perf.algo, algo_perf.mathType};
-                 });
+                 [](const T& algo_perf) { return algo_perf.algo; });
   return result;
 }
 
@@ -493,7 +468,7 @@ TEST_P(ConvolutionTest, GetAlgorithm_v7) {
     ASSERT_OK_AND_ASSIGN(
         auto output, CreateOutputDescriptor(proto, input, filter, convolution));
 
-    std::vector<ConvolutionAlgoAndMathType> get_v7_algos;
+    std::vector<ConvolutionAlgo> v7_algos;
     int num_algorithms = 0;
     switch (direction) {
       case proto::CONVOLUTION_FWD: {
@@ -504,7 +479,7 @@ TEST_P(ConvolutionTest, GetAlgorithm_v7) {
             handle.get(), input.get(), filter.get(), convolution.get(),
             output.get(), algo_perfs.size(), &num_algorithms,
             algo_perfs.data()))));
-        get_v7_algos = ToConvolutionAlgos(algo_perfs, num_algorithms);
+        v7_algos = ToConvolutionAlgos(algo_perfs, num_algorithms);
       } break;
       case proto::CONVOLUTION_BWD_DATA: {
         ASSERT_TRUE(
@@ -516,7 +491,7 @@ TEST_P(ConvolutionTest, GetAlgorithm_v7) {
             handle.get(), filter.get(), output.get(), convolution.get(),
             input.get(), algo_perfs.size(), &num_algorithms,
             algo_perfs.data()))));
-        get_v7_algos = ToConvolutionAlgos(algo_perfs, num_algorithms);
+        v7_algos = ToConvolutionAlgos(algo_perfs, num_algorithms);
       } break;
       case proto::CONVOLUTION_BWD_FILTER: {
         ASSERT_TRUE(
@@ -529,40 +504,33 @@ TEST_P(ConvolutionTest, GetAlgorithm_v7) {
                 handle.get(), input.get(), output.get(), convolution.get(),
                 filter.get(), algo_perfs.size(), &num_algorithms,
                 algo_perfs.data()))));
-        get_v7_algos = ToConvolutionAlgos(algo_perfs, num_algorithms);
+        v7_algos = ToConvolutionAlgos(algo_perfs, num_algorithms);
       } break;
       default:
         LOG(FATAL) << "Invalid direction: "
                    << proto::ConvolutionDirection_Name(direction);
     }
+    std::sort(v7_algos.begin(), v7_algos.end());
 
-    std::vector<ConvolutionAlgoAndMathType> get_supported_algos;
-    auto add_supported_algos = [&](cudnnMathType_t math_type) {
-      CHECK_OK_STATUS(
-          GetStatus(cudnnSetConvolutionMathType(convolution.get(), math_type)));
-      auto algos = GetSupportedConvolutionAlgos(
-          handle, direction, input, filter, convolution, output,
-          std::numeric_limits<size_t>::max());
-      std::transform(algos.begin(), algos.end(),
-                     std::back_inserter(get_supported_algos),
-                     [&](const ConvolutionAlgo& algo) {
-                       return ConvolutionAlgoAndMathType{algo, math_type};
-                     });
-    };
-
-    // Unlike GetSupportedConvolutionAlgos, cudnnGetConvolution*Algorithm_v7
-    // also returns algo_perfs with DEFAULT_MATH if the convolution specifies
-    // TENSOR_OP_MATH. If this is the case, get supported algorithms for both
-    // math types.
-    auto math_type = proto.convolution().math_type();
-    add_supported_algos(static_cast<cudnnMathType_t>(math_type));
-    if (math_type == proto::TENSOR_OP_MATH) {
-      add_supported_algos(CUDNN_DEFAULT_MATH);
+    // If the convolution specifies TENSOR_OP_MATH, GetSupportedConvolutionAlgos
+    // returns algorithms that silently fall back to DEFAULT_MATH as well.
+    // cudnnGetConvolution*Algorithm_v7 on the other hand returns separate
+    // algo_perfs for DEFAULT_MATH and TENSOR_OP_MATH (but the latter may still
+    // fall back to DEFAULT_MATH). We can savely remove duplicates from v7_algos
+    // because TensorFlow tries to run every algorithm for both math types.
+    //
+    // See nvbugs/2072859 for details.
+    if (proto.convolution().math_type() == proto::TENSOR_OP_MATH) {
+      v7_algos.erase(std::unique(v7_algos.begin(), v7_algos.end()),
+                     v7_algos.end());
     }
 
-    std::sort(get_supported_algos.begin(), get_supported_algos.end());
-    std::sort(get_v7_algos.begin(), get_v7_algos.end());
-    EXPECT_EQ(get_supported_algos, get_v7_algos);
+    auto supported_algos = GetSupportedConvolutionAlgos(
+        handle, direction, input, filter, convolution, output,
+        std::numeric_limits<size_t>::max());
+    std::sort(supported_algos.begin(), supported_algos.end());
+
+    EXPECT_EQ(supported_algos, v7_algos);
   }
 }
 #endif  // CUDNN_MAJOR >= 7
