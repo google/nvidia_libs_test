@@ -7,11 +7,7 @@
 #
 # cuDNN 6.0.21 fails to run the convolution with STATUS_INTERNAL_ERROR.
 #
-# See nvbugs/2071663.
-#
-# cuDNN 7.0.5 fails to run the convolution with STATUS_NOT_SUPPORTED.
-#
-# See nvbugs/2082072.
+# See nvbugs/2071663. Resolution: will not fix.
 convolution_test {
   reference {
     input {
@@ -33,17 +29,22 @@ convolution_test {
     convolution {
       pad: 1
       pad: 1
-      compute_mode: DATA_HALF
+      compute_mode: DATA_FLOAT
     }
     fwd_algo: CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM
     label: "NHWC_TRUE_HALF_CONFIG_Unsupported"
+  }
+  test {
+    convolution {
+      compute_mode: DATA_HALF
+    }
   }
 }
 
 # This FLOAT_CONFIG in NHWC format fails with STATUS_INTERNAL_ERROR on cuDNN
 # 6.0.21. Fixed in cuDNN 7.
 #
-# See nvbugs/2071665.
+# See nvbugs/2071665. Resolution: will not fix.
 convolution_test {
   reference {
     input {
@@ -143,9 +144,7 @@ convolution_test {
 # This DOUBLE_CONFIG in NCHW format fails with STATUS_EXECUTION_FAILED on
 # cuDNN 7.1.1, tested with V100-SXM2.
 #
-# The next cuDNN release is expected to return STATUS_NOT_SUPPORTED instead.
-#
-# See nvbugs/2072858.
+# See nvbugs/2072858. cuDNN 7.1.2 returns STATUS_NOT_SUPPORTED.
 #
 # Ideally, cudnnGetWorkspaceSize would already return STATUS_NOT_SUPPORTED,
 # but NVIDIA says that will take a while to fix. They will mention this
