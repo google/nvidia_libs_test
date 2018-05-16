@@ -73,11 +73,10 @@ cc_library(
         ":cuda_util",
         ":cudnn_cc_proto",
         ":glog",
+        "@com_google_absl//absl/types:variant",
         "@local_config_cuda//:cuda_headers",
         "@local_config_cuda//:cudart_static",
-        "@local_config_cuda//:cudnn_headers",
-        "@local_config_cuda//:cudnn_static",
-        "@mpark_variant//:variant",
+        "@local_config_cuda//:cudnn",
     ],
 )
 

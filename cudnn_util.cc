@@ -598,7 +598,7 @@ struct ConvertDeviceDataVisitor {
   double scale;
 };
 
-mpark::variant<float*, double*, __half*> GetPointerVariant(
+absl::variant<float*, double*, __half*> GetPointerVariant(
     const DeviceMemory& data, cudnnDataType_t data_type) {
   switch (data_type) {
     case CUDNN_DATA_FLOAT:

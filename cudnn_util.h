@@ -21,7 +21,7 @@
 #include <memory>
 #include <string>
 
-#include "variant.hpp"
+#include "absl/types/variant.h"
 #include "cudnn/include/cudnn.h"
 #include "cuda_util.h"
 #include "cudnn.pb.h"
@@ -60,7 +60,7 @@ using ConvolutionDescriptor =
 
 // Specifies one convolution algorithm.
 using ConvolutionAlgo =
-    mpark::variant<cudnnConvolutionFwdAlgo_t, cudnnConvolutionBwdDataAlgo_t,
+    absl::variant<cudnnConvolutionFwdAlgo_t, cudnnConvolutionBwdDataAlgo_t,
                   cudnnConvolutionBwdFilterAlgo_t>;
 
 // Creates a cuDNN handle.
@@ -234,7 +234,7 @@ StatusOr<Convolution> CreateConvolution(const proto::ConvolutionConfig& proto,
 // That's important so it can be called from any namespace, not just the
 // namespace it was declared in.
 //
-// ConvolutionAlgo is an instantiation of the mpark::variant template class with
+// ConvolutionAlgo is an instantiation of the absl::variant template class with
 // types from the global namespace (::cudnnConvolutionFwdAlgo_t etc.). The fact
 // that the typedef is in the nvidia_libs_test namespace is irrelevant for ADL.
 // It's undefined behavior to overload functions in the std namespace, and the

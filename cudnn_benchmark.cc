@@ -25,6 +25,7 @@
 // - Using non-default scaling factors (alpha and beta).
 //
 #include <algorithm>
+#include <functional>
 
 #include "gflags/gflags.h"
 #include "ostream_nullptr.h"
@@ -313,20 +314,108 @@ google::protobuf::RepeatedPtrField<proto::ConvolutionConfig> GetTensorFlowBenchm
   return benchmarks;
 }
 
+google::protobuf::RepeatedPtrField<proto::ConvolutionConfig> GetDepthwiseBenchmarks() {
+  google::protobuf::RepeatedPtrField<proto::ConvolutionConfig> benchmarks;
+
+  if (CUDNN_MAJOR < 7) {
+    return benchmarks;  // No grouped convolution before cuDNN 7.
+  }
+
+  auto add_benchmark = [&](int batch, int in_height, int in_width, int in_depth,
+                           int out_depth, int filter_height, int filter_width,
+                           const string& label_suffix) {
+    proto::TensorDescriptor input;
+    input.add_dimension(batch);
+    input.add_dimension(in_depth);
+    input.add_dimension(in_height);
+    input.add_dimension(in_width);
+
+    proto::FilterDescriptor filter;
+    filter.add_dimension(out_depth);
+    filter.add_dimension(1);
+    filter.add_dimension(filter_height);
+    filter.add_dimension(filter_width);
+
+    proto::ConvolutionDescriptor convolution;
+    convolution.add_pad(filter_height / 2);
+    convolution.add_pad(filter_width / 2);
+    convolution.set_group_count(in_depth);
+    // Note: tensor cores are not currently (cuDNN 7.1) supported for grouped
+    // convolutions.
+    convolution.set_math_type(proto::TENSOR_OP_MATH);
+
+    proto::TensorDescriptor output;
+    output.add_dimension(batch);
+    output.add_dimension(out_depth);
+    output.add_dimension(in_height);
+    output.add_dimension(in_width);
+
+    proto::ConvolutionConfig benchmark;
+    *benchmark.mutable_input() = std::move(input);
+    *benchmark.mutable_filter() = std::move(filter);
+    *benchmark.mutable_convolution() = std::move(convolution);
+    *benchmark.mutable_output() = std::move(output);
+
+    for (auto direction : {proto::CONVOLUTION_FWD, proto::CONVOLUTION_BWD_DATA,
+                           proto::CONVOLUTION_BWD_FILTER}) {
+      for (auto data_type : {proto::DATA_FLOAT, proto::DATA_HALF}) {
+        benchmark.mutable_input()->set_data_type(data_type);
+        benchmark.mutable_filter()->set_data_type(data_type);
+        benchmark.mutable_output()->set_data_type(data_type);
+        std::vector<proto::DataType> compute_modes = {proto::DATA_FLOAT};
+        if (data_type == proto::DATA_HALF) {
+          compute_modes.push_back(proto::DATA_HALF);
+        }
+        for (auto compute_mode : compute_modes) {
+          // Note: true half configuration is terribly slow.
+          benchmark.mutable_convolution()->set_compute_mode(compute_mode);
+          std::vector<proto::TensorFormat> formats = {proto::TENSOR_NCHW};
+          if (direction == proto::CONVOLUTION_FWD) {
+            formats.push_back(proto::TENSOR_NHWC);
+          }
+          for (auto format : formats) {
+            benchmark.set_find_algo(direction);
+            benchmark.mutable_input()->set_format(format);
+            // Note: OHWI filter format is not supported for grouped
+            // convolutions.
+            benchmark.mutable_filter()->set_format(proto::TENSOR_NCHW);
+            benchmark.mutable_output()->set_format(format);
+            benchmark.set_label(proto::ConvolutionDirection_Name(direction) +
+                                '/' + proto::TensorFormat_Name(format) + '/' +
+                                proto::DataType_Name(data_type) + '/' +
+                                proto::DataType_Name(compute_mode) + '/' +
+                                label_suffix);
+            *benchmarks.Add() = benchmark;
+          }
+        }
+      }
+    }
+  };
+
+  add_benchmark(128, 64, 64, 32, 32, 3, 3, "depthwise0");
+
+  std::stable_sort(benchmarks.begin(), benchmarks.end(),
+                   [](const proto::ConvolutionConfig& left,
+                      const proto::ConvolutionConfig& right) {
+                     return left.label() < right.label();
+                   });
+
+  return benchmarks;
+}
+
 void RegisterConvolutionBenchmarks(
     const string& prefix,
     const google::protobuf::RepeatedPtrField<proto::ConvolutionConfig>& benchmarks) {
   for (const auto& benchmark : benchmarks) {
     ConfigureTime(benchmark::RegisterBenchmark(
         ("BM_CudnnConvolution/" + prefix + "/" + benchmark.label()).c_str(),
-        [](benchmark::State& state, const proto::ConvolutionConfig& proto) {
-          auto status = ConvolutionBenchmark(state, proto);
+        [benchmark](benchmark::State& state) {
+          auto status = ConvolutionBenchmark(state, benchmark);
           if (!status.ok()) {
             state.SkipWithError(status.message().c_str());
             ResetDevice();
           }
-        },
-        benchmark));
+        }));
   }
 }
 
@@ -355,12 +444,12 @@ void RegisterTransformationBenchmarks() {
     nchw.set_format(proto::TENSOR_NHWC);
 
     ConfigureTime(benchmark::RegisterBenchmark(
-        ("BM_CudnnTransformation/NchwToNhwc/" + label_suffix).c_str(), runner,
-        nchw, nhwc));
+        ("BM_CudnnTransformation/NchwToNhwc/" + label_suffix).c_str(),
+        std::bind(runner, std::placeholders::_1, nchw, nhwc)));
 
     ConfigureTime(benchmark::RegisterBenchmark(
-        ("BM_CudnnTransformation/NhwcToNchw/" + label_suffix).c_str(), runner,
-        nhwc, nchw));
+        ("BM_CudnnTransformation/NhwcToNchw/" + label_suffix).c_str(),
+        std::bind(runner, std::placeholders::_1, nhwc, nchw)));
   };
 
   // Uses the same tensor sizes and indices as GetTensorFlowBenchmarks() above.
@@ -392,6 +481,7 @@ void RegisterBenchmarks() {
   RegisterConvolutionBenchmarks(
       "FromFile", GetCudnnBenchmarksFromFile().convolution_benchmark());
   RegisterConvolutionBenchmarks("TensorFlow", GetTensorFlowBenchmarks());
+  RegisterConvolutionBenchmarks("Depthwise", GetDepthwiseBenchmarks());
   RegisterTransformationBenchmarks();
 }
 

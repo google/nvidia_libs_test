@@ -83,20 +83,17 @@ cc_library(
 )
 
 cc_library(
-    name = "cudnn_headers",
-    hdrs = ["cudnn/include/cudnn.h"],
-    deps = [":cuda_headers"],
-    alwayslink = 1,
-)
-
-cc_library(
-    name = "cudnn_static",
+    name = "cudnn",
     srcs = [
         "cudnn/lib64/libcudnn_static.a",
         "cuda/lib64/libcublas_static.a",
         "cuda/lib64/libculibos.a",
     ],
-    deps = [":cuda"],
+    hdrs = ["cudnn/include/cudnn.h"],
+    deps = [
+        ":cuda",
+        ":cuda_headers"
+    ],
     alwayslink = 1,
 )
 

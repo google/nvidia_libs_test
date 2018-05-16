@@ -3,9 +3,9 @@ load ("//:cuda_configure.bzl", "cuda_configure")
 # ===== absl =====
 http_archive(
     name = "com_google_absl",
-    url = "https://github.com/abseil/abseil-cpp/archive/bf7fc9986e20f664958fc227547fd8d2fdcf863e.zip",
-    sha256 = "c0021254ad6c851aac06bd4b078728d2c953da5ade3a85bc4118dcbaf0cdcd0a",
-    strip_prefix = "abseil-cpp-bf7fc9986e20f664958fc227547fd8d2fdcf863e",
+    url = "https://github.com/abseil/abseil-cpp/archive/9613678332c976568272c8f4a78631a29159271d.zip",
+    sha256 = "bd377bfffee86e65a1aafcb1c4cc1535916199006683d53262f335ae21e67c57",
+    strip_prefix = "abseil-cpp-9613678332c976568272c8f4a78631a29159271d",
 )
 
 # ===== gtest =====
@@ -183,23 +183,6 @@ http_archive(
     url = "https://github.com/google/protobuf/archive/v3.5.1.zip",
     sha256 = "1f8b9b202e9a4e467ff0b0f25facb1642727cdf5e69092038f15b37c75b99e45",
     strip_prefix = "protobuf-3.5.1",
-)
-
-new_http_archive(
-    name = "mpark_variant",
-    url = "https://github.com/mpark/variant/archive/v1.3.0.zip",
-    sha256 = "c125b74c7f1ad6ae5effc42c28da0e062b448fd7e7ddc4d95a14f9c72165aaac",
-    strip_prefix = "variant-1.3.0",
-    build_file_content = """
-licenses(["notice"])
-
-cc_library(
-    name = "variant",
-    hdrs = glob(["include/mpark/*.hpp"]),
-    strip_include_prefix = "include/mpark",
-    visibility = ["//visibility:public"],
-)
-    """,
 )
 
 # ===== cuda =====
