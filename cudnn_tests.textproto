@@ -231,6 +231,63 @@ convolution_test {
   }
 }
 
+# This 3D convolution produces an illegal memory access using the FFT tiling
+# algorithm. Tested with cuDNN 7.0.5.
+#
+# See nvbugs/2138754.
+convolution_test {
+  reference {
+    input {
+      dimension: 12
+      dimension: 4095
+      dimension: 1
+      dimension: 1
+      dimension: 1
+
+      stride: 4095
+      stride: 1
+      stride: 1
+      stride: 1
+      stride: 1
+
+      data_type: DATA_FLOAT
+    }
+    filter {
+      dimension: 4095
+      dimension: 4095
+      dimension: 1
+      dimension: 1
+      dimension: 1
+      data_type: DATA_FLOAT
+      format: TENSOR_NCHW
+    }
+    output {
+      dimension: 12
+      dimension: 4095
+      dimension: 1
+      dimension: 1
+      dimension: 1
+
+      stride: 4095
+      stride: 1
+      stride: 1
+      stride: 1
+      stride: 1
+
+      data_type: DATA_FLOAT
+    }
+    convolution {
+      pad: 0
+      pad: 0
+      pad: 0
+      compute_mode: DATA_FLOAT
+    }
+    fwd_algo: CONVOLUTION_FWD_ALGO_FFT_TILING
+    # Disabled to prevent crashing on normal runs.
+    label: "DISABLED_CONVOLUTION_3D_FWD_12x4095x1x1x1_4095x4095x1x1x1_SAME_Illegal_Address"
+  }
+}
+
 # Checks that the testing code handles beta > 0 correctly.
 convolution_test {
   reference {
