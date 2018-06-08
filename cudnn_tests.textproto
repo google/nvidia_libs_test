@@ -101,8 +101,7 @@ convolution_test {
       compute_mode: DATA_FLOAT
     }
     fwd_algo: CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM
-    # Disabled to prevent crashing on normal runs.
-    label: "DISABLED_NHWC_PSUEDO_HALF_CONFIG_Crash"
+    label: "NHWC_PSEUDO_HALF_CONFIG_Crash"
   }
 }
 
@@ -287,6 +286,40 @@ convolution_test {
     label: "DISABLED_CONVOLUTION_3D_FWD_12x4095x1x1x1_4095x4095x1x1x1_SAME_Illegal_Address"
   }
 }
+
+# This grouped convolution produces a misaligned memory access using the
+# backward filter FFT algorithm. Tested with cuDNN 7.1.4.
+#
+# See nvbugs/2181786.
+convolution_test {
+  reference {
+    input {
+      dimension: 7
+      dimension: 24
+      dimension: 51
+      dimension: 23
+      format: TENSOR_NCHW
+      data_type: DATA_FLOAT
+    }
+    filter {
+      dimension: 222
+      dimension: 8
+      dimension: 1
+      dimension: 3
+      format: TENSOR_NCHW
+      data_type: DATA_FLOAT
+    }
+    convolution {
+      pad: 0
+      pad: 1
+      compute_mode: DATA_FLOAT
+      group_count: 3
+    }
+    bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_FFT
+    label: "DISABLED_CONVOLUTION_BWD_FILTER_NCHW_FLOAT_7x24x51x23_222x8x1x3_SAME_Misaligned_Address"
+  }
+}
+
 
 # Checks that the testing code handles beta > 0 correctly.
 convolution_test {

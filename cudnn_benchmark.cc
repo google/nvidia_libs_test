@@ -198,20 +198,20 @@ google::protobuf::RepeatedPtrField<proto::ConvolutionConfig> GetTensorFlowBenchm
 
   google::protobuf::RepeatedPtrField<proto::ConvolutionConfig> benchmarks;
 
-  auto add_benchmark = [&](int batch, int in_height, int in_width, int in_depth,
-                           int out_depth, int filter_height, int filter_width,
-                           int unused_stride, Padding padding,
+  auto add_benchmark = [&](int batch, int in_height, int in_width,
+                           int in_channels, int out_channels, int filter_height,
+                           int filter_width, int unused_stride, Padding padding,
                            const string& label_suffix) {
     proto::TensorDescriptor input;
     input.add_dimension(batch);
-    input.add_dimension(in_depth);
+    input.add_dimension(in_channels);
     input.add_dimension(in_height);
     input.add_dimension(in_width);
     input.set_data_type(proto::DATA_FLOAT);
 
     proto::FilterDescriptor filter;
-    filter.add_dimension(out_depth);
-    filter.add_dimension(in_depth);
+    filter.add_dimension(out_channels);
+    filter.add_dimension(in_channels);
     filter.add_dimension(filter_height);
     filter.add_dimension(filter_width);
     filter.set_data_type(proto::DATA_FLOAT);
@@ -321,17 +321,17 @@ google::protobuf::RepeatedPtrField<proto::ConvolutionConfig> GetDepthwiseBenchma
     return benchmarks;  // No grouped convolution before cuDNN 7.
   }
 
-  auto add_benchmark = [&](int batch, int in_height, int in_width, int in_depth,
-                           int out_depth, int filter_height, int filter_width,
-                           const string& label_suffix) {
+  auto add_benchmark = [&](int batch, int in_height, int in_width,
+                           int in_channels, int out_channels, int filter_height,
+                           int filter_width, const string& label_suffix) {
     proto::TensorDescriptor input;
     input.add_dimension(batch);
-    input.add_dimension(in_depth);
+    input.add_dimension(in_channels);
     input.add_dimension(in_height);
     input.add_dimension(in_width);
 
     proto::FilterDescriptor filter;
-    filter.add_dimension(out_depth);
+    filter.add_dimension(out_channels);
     filter.add_dimension(1);
     filter.add_dimension(filter_height);
     filter.add_dimension(filter_width);
@@ -339,14 +339,14 @@ google::protobuf::RepeatedPtrField<proto::ConvolutionConfig> GetDepthwiseBenchma
     proto::ConvolutionDescriptor convolution;
     convolution.add_pad(filter_height / 2);
     convolution.add_pad(filter_width / 2);
-    convolution.set_group_count(in_depth);
+    convolution.set_group_count(in_channels);
     // Note: tensor cores are not currently (cuDNN 7.1) supported for grouped
     // convolutions.
     convolution.set_math_type(proto::TENSOR_OP_MATH);
 
     proto::TensorDescriptor output;
     output.add_dimension(batch);
-    output.add_dimension(out_depth);
+    output.add_dimension(out_channels);
     output.add_dimension(in_height);
     output.add_dimension(in_width);
 
@@ -420,7 +420,7 @@ void RegisterConvolutionBenchmarks(
 }
 
 void RegisterTransformationBenchmarks() {
-  auto add_benchmark = [](int batch, int height, int width, int depth,
+  auto add_benchmark = [](int batch, int height, int width, int channels,
                           const string& label_suffix) {
     auto runner = [](benchmark::State& state,
                      const proto::TensorDescriptor& first,
@@ -434,7 +434,7 @@ void RegisterTransformationBenchmarks() {
 
     proto::TensorDescriptor nchw;
     nchw.add_dimension(batch);
-    nchw.add_dimension(depth);
+    nchw.add_dimension(channels);
     nchw.add_dimension(height);
     nchw.add_dimension(width);
     nchw.set_format(proto::TENSOR_NCHW);

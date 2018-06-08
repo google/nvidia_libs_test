@@ -150,6 +150,49 @@ TEST(ConvolutionTest, GetConvolutionDesciptor_ArrayLengthRequested_Range) {
                      << array_length_requested));
   }
 }
+
+#if CUDNN_MAJOR >= 7
+// Tests that cudnnGetConvolution2dForwardOutputDim handles grouped
+// convolutions.
+//
+// See nvbugs/2178340, works as intended.
+TEST(ConvolutionTest, GetGroupedConvolutionForwardOutputDim) {
+  CudnnHandle handle;
+  proto::TensorDescriptor input_desc;
+  input_desc.set_data_type(proto::DATA_FLOAT);
+  input_desc.set_format(proto::TENSOR_NCHW);
+  for (int dim : {3, 88, 4, 17}) {
+    input_desc.add_dimension(dim);
+  }
+  auto input = CreateTensorDescriptor(input_desc);
+
+  proto::FilterDescriptor filter_desc;
+  filter_desc.set_data_type(proto::DATA_FLOAT);
+  filter_desc.set_format(proto::TENSOR_NCHW);
+  for (int dim : {14, 44, 3, 5}) {
+    filter_desc.add_dimension(dim);
+  }
+  auto filter = CreateFilterDescriptor(filter_desc);
+
+  proto::ConvolutionDescriptor conv_desc;
+  conv_desc.set_compute_mode(proto::DATA_FLOAT);
+  for (int pad : {1, 2}) {
+    conv_desc.add_pad(pad);
+  }
+  conv_desc.set_group_count(2);
+  auto convolution = CreateConvolutionDescriptor(conv_desc);
+
+  int n, c, h, w;
+  ASSERT_TRUE(IsOk(GetStatus(cudnnGetConvolution2dForwardOutputDim(
+      convolution.get(), input.get(), filter.get(), &n, &c, &h, &w))));
+
+  EXPECT_EQ(n, input_desc.dimension(0));
+  EXPECT_EQ(c, filter_desc.dimension(0));
+  EXPECT_EQ(h, input_desc.dimension(2));
+  EXPECT_EQ(w, input_desc.dimension(3));
+}
+#endif
+
 }  // namespace nvidia_libs_test
 int main(int argc, char** argv) {
   // Parse and validate flags before initializing gtest.

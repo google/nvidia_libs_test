@@ -50,13 +50,10 @@ cc_library(
 )
 
 cc_library(
-    name = "cudart_static",
-    # Can't get it to work with static cudart: 'undefined symbol: cudaGetErrorString'
-    # srcs = ["cuda/lib64/libcudart_static.a"]
-    srcs = glob(["cuda/lib64/libcudart.so*"]),
+    name = "cuda_runtime",
+    srcs = ["cuda/lib64/libcudart_static.a"],
     deps = [":cuda"],
     linkopts = ["-lrt"],
-    alwayslink = 1,
 )
 
 cc_library(
@@ -65,7 +62,6 @@ cc_library(
         "cuda/lib64/libcurand_static.a",
         "cuda/lib64/libculibos.a",
     ],
-    alwayslink = 1,
 )
 
 cc_library(
@@ -73,13 +69,11 @@ cc_library(
     hdrs = glob(["cuda/extras/CUPTI/include/**/*.h"]),
     # Allows including CUPTI headers with angle brackets.
     includes = ["cuda/extras/CUPTI/include"],
-    alwayslink = 1,
 )
 
 cc_library(
     name = "cupti",
     srcs = glob(["cuda/extras/CUPTI/lib64/libcupti.so*"]),
-    alwayslink = 1,
 )
 
 cc_library(
@@ -94,7 +88,6 @@ cc_library(
         ":cuda",
         ":cuda_headers"
     ],
-    alwayslink = 1,
 )
 
 cc_library(

@@ -122,6 +122,17 @@ TensorDescriptor CreateTensorDescriptor() {
   CHECK_OK_STATUS(GetStatus(cudnnCreateTensorDescriptor(&result)));
   return TensorDescriptor{result};
 }
+
+// Returns the strides for a fully packed tensor.
+std::array<int, CUDNN_DIM_MAX> GetFullyPackedStrides(const int* dims,
+                                                     int rank) {
+  std::array<int, CUDNN_DIM_MAX> result;
+  for (int i = rank - 1, stride = 1; i >= 0; --i) {
+    result[i] = stride;
+    stride *= dims[i];
+  }
+  return result;
+}
 }  // namespace
 
 TensorDescriptor CreateTensorDescriptor(proto::TensorDescriptor proto) {
@@ -129,18 +140,24 @@ TensorDescriptor CreateTensorDescriptor(proto::TensorDescriptor proto) {
   CHECK_EQ(!proto.stride_size(),
            proto.format_oneof_case() == proto::TensorDescriptor::kFormat);
   int rank = proto.dimension_size();
+  auto data_type = static_cast<cudnnDataType_t>(proto.data_type());
   auto result = CreateTensorDescriptor();
   if (proto.stride_size()) {
     CHECK_EQ(rank, proto.stride_size());
     CHECK_OK_STATUS(GetStatus(cudnnSetTensorNdDescriptor(
-        result.get(), static_cast<cudnnDataType_t>(proto.data_type()), rank,
-        proto.dimension().data(), proto.stride().data())));
-  } else {
-    CHECK_EQ(rank, 4);
+        result.get(), data_type, rank, proto.dimension().data(),
+        proto.stride().data())));
+  } else if (rank == 4) {
     CHECK_OK_STATUS(GetStatus(cudnnSetTensor4dDescriptor(
         result.get(), static_cast<cudnnTensorFormat_t>(proto.format()),
-        static_cast<cudnnDataType_t>(proto.data_type()), proto.dimension(0),
-        proto.dimension(1), proto.dimension(2), proto.dimension(3))));
+        data_type, proto.dimension(0), proto.dimension(1), proto.dimension(2),
+        proto.dimension(3))));
+  } else {
+    CHECK_EQ(proto.format(), proto::TENSOR_NCHW);
+    auto strides = GetFullyPackedStrides(proto.dimension().data(), rank);
+    CHECK_OK_STATUS(GetStatus(
+        cudnnSetTensorNdDescriptor(result.get(), data_type, rank,
+                                   proto.dimension().data(), strides.data())));
   }
   return result;
 }
@@ -219,17 +236,24 @@ StatusOr<DeviceMemory> CreateTensorData(const TensorDescriptor& tensor,
                                 GetTensorNumElements(tensor), rand_gen);
 }
 
+namespace {
+FilterDescriptor CreateFilterDescriptor() {
+  cudnnFilterDescriptor_t result;
+  CHECK_OK_STATUS(GetStatus(cudnnCreateFilterDescriptor(&result)));
+  return FilterDescriptor{result};
+}
+}  // namespace
+
 FilterDescriptor CreateFilterDescriptor(const proto::FilterDescriptor& proto) {
   CHECK_EQ(proto.data_type_oneof_case(), proto::FilterDescriptor::kDataType);
   CHECK_EQ(proto.format_oneof_case(), proto::FilterDescriptor::kFormat);
   int rank = proto.dimension_size();
-  cudnnFilterDescriptor_t result;
-  cudnnCreateFilterDescriptor(&result);
+  auto result = CreateFilterDescriptor();
   CHECK_OK_STATUS(GetStatus(cudnnSetFilterNdDescriptor(
-      result, static_cast<cudnnDataType_t>(proto.data_type()),
+      result.get(), static_cast<cudnnDataType_t>(proto.data_type()),
       static_cast<cudnnTensorFormat_t>(proto.format()), rank,
       proto.dimension().data())));
-  return FilterDescriptor{result};
+  return result;
 }
 
 namespace {
@@ -282,6 +306,45 @@ StatusOr<DeviceMemory> CreateFilterData(const FilterDescriptor& filter,
                                 GetFilterNumElements(filter), rand_gen);
 }
 
+namespace {
+ConvolutionDescriptor CreateConvolutionDescriptor() {
+  cudnnConvolutionDescriptor_t result;
+  CHECK_OK_STATUS(GetStatus(cudnnCreateConvolutionDescriptor(&result)));
+  return ConvolutionDescriptor{result};
+}
+
+#if CUDNN_MAJOR < 7
+// Forward-compatibility for grouped convolution added in cuDNN 7.
+cudnnStatus_t cudnnSetConvolutionGroupCount(cudnnConvolutionDescriptor_t,
+                                            int group_count) {
+  CHECK_EQ(proto.group_count(), 1) << "Grouped convolution requires cuDNN 7";
+  return CUDNN_STATUS_SUCCESS;
+}
+cudnnStatus_t cudnnGetConvolutionGroupCount(cudnnConvolutionDescriptor_t,
+                                            int* group_count) {
+  *group_count = 1;
+  return CUDNN_STATUS_SUCCESS;
+}
+
+// Forward-compatibility for tensor math added in cuDNN 7.
+typedef enum {
+  CUDNN_DEFAULT_MATH = 0,
+} cudnnMathType_t;
+
+cudnnStatus_t cudnnSetConvolutionMathType(cudnnConvolutionDescriptor_t,
+                                          cudnnMathType_t math_type) {
+  LOG_IF(WARNING, math_type != CUDNN_DEFAULT_MATH)
+      << "Math type other than CUDNN_DEFAULT_MATH requires cuDNN 7";
+  return CUDNN_STATUS_SUCCESS;
+}
+cudnnStatus_t cudnnGetConvolutionMathType(cudnnConvolutionDescriptor_t,
+                                          cudnnMathType_t* math_type) {
+  *math_type = CUDNN_DEFAULT_MATH;
+  return CUDNN_STATUS_SUCCESS;
+}
+#endif
+}  // namespace
+
 ConvolutionDescriptor CreateConvolutionDescriptor(
     proto::ConvolutionDescriptor proto) {
   CHECK_EQ(proto.compute_mode_oneof_case(),
@@ -297,35 +360,24 @@ ConvolutionDescriptor CreateConvolutionDescriptor(
   while (proto.dilation_size() < rank) {
     proto.add_dilation(1);
   }
-  cudnnConvolutionDescriptor_t result;
-  cudnnCreateConvolutionDescriptor(&result);
+  auto result = CreateConvolutionDescriptor();
+  // Note: proto.mode() returns CONVOLUTION if not set.
   CHECK_OK_STATUS(GetStatus(cudnnSetConvolutionNdDescriptor(
-      result, rank, proto.pad().data(), proto.filter_stride().data(),
+      result.get(), rank, proto.pad().data(), proto.filter_stride().data(),
       proto.dilation().data(),
       static_cast<cudnnConvolutionMode_t>(proto.mode()),
       static_cast<cudnnDataType_t>(proto.compute_mode()))));
-#if CUDNN_MAJOR >= 7
   if (proto.group_count() > 0) {
-    CHECK_OK_STATUS(
-        GetStatus(cudnnSetConvolutionGroupCount(result, proto.group_count())));
+    CHECK_OK_STATUS(GetStatus(
+        cudnnSetConvolutionGroupCount(result.get(), proto.group_count())));
   }
+  // Note: proto.math_type() returns DEFAULT_MATH if not set.
   CHECK_OK_STATUS(GetStatus(cudnnSetConvolutionMathType(
-      result, static_cast<cudnnMathType_t>(proto.math_type()))));
-#else
-  CHECK_LE(proto.group_count(), 1) << "Grouped convolution requires cuDNN 7";
-  LOG_IF(WARNING, proto.math_type() != proto::DEFAULT_MATH)
-      << proto::MathType_Name(proto.math_type()) << " requires cuDNN 7";
-#endif
-  return ConvolutionDescriptor{result};
+      result.get(), static_cast<cudnnMathType_t>(proto.math_type()))));
+  return result;
 }
 
 namespace {
-#if CUDNN_MAJOR < 7
-// Forward-compatible math type added in cuDNN 7.
-typedef enum {
-  CUDNN_DEFAULT_MATH = 0,
-} cudnnMathType_t;
-#endif
 
 struct ConvolutionDescriptorData {
   int rank;
@@ -348,41 +400,71 @@ bool operator==(const ConvolutionDescriptorData& left,
 }
 
 ConvolutionDescriptorData GetConvolutionDescriptorData(
-    const ConvolutionDescriptor& convolution) {
+    cudnnConvolutionDescriptor_t convolution) {
   ConvolutionDescriptorData data{};
   // array_length should be no larger than CUDNN_DIM_MAX according to the
   // documentation, but at least cuDNN 7 reports CUDNN_STATUS_NOT_SUPPORTED
   // for anything larger than 6.
   int array_length = 6;
   CHECK_OK_STATUS(GetStatus(cudnnGetConvolutionNdDescriptor(
-      convolution.get(), array_length, &data.rank, data.pad, data.stride,
+      convolution, array_length, &data.rank, data.pad, data.stride,
       data.dilation, &data.convolution_mode, &data.compute_type)));
-#if CUDNN_MAJOR >= 7
-  CHECK_OK_STATUS(GetStatus(
-      cudnnGetConvolutionMathType(convolution.get(), &data.math_type)));
-  CHECK_OK_STATUS(GetStatus(
-      cudnnGetConvolutionGroupCount(convolution.get(), &data.group_count)));
-#endif
+  CHECK_OK_STATUS(
+      GetStatus(cudnnGetConvolutionMathType(convolution, &data.math_type)));
+  CHECK_OK_STATUS(
+      GetStatus(cudnnGetConvolutionGroupCount(convolution, &data.group_count)));
   return data;
 }
 }  // namespace
 
 bool ConvolutionDescriptorEqual(const ConvolutionDescriptor& left,
                                 const ConvolutionDescriptor& right) {
-  return GetConvolutionDescriptorData(left) ==
-         GetConvolutionDescriptorData(right);
+  return GetConvolutionDescriptorData(left.get()) ==
+         GetConvolutionDescriptorData(right.get());
 }
 
 StatusOr<TensorDescriptor> CreateOutputDescriptor(
     const proto::TensorFormat& format, const TensorDescriptor& input,
     const FilterDescriptor& filter, const ConvolutionDescriptor& convolution) {
-  int n, c, h, w;
-  RETURN_IF_ERROR_STATUS(GetStatus(cudnnGetConvolution2dForwardOutputDim(
-      convolution.get(), input.get(), filter.get(), &n, &c, &h, &w)));
+  auto input_data = GetTensorDescriptorData(input.get());
   auto output = CreateTensorDescriptor();
-  RETURN_IF_ERROR_STATUS(GetStatus(cudnnSetTensor4dDescriptor(
-      output.get(), static_cast<cudnnTensorFormat_t>(format),
-      GetTensorDataType(input), n, c, h, w)));
+  if (input_data.rank == 4) {
+    int n, c, h, w;
+    RETURN_IF_ERROR_STATUS(GetStatus(cudnnGetConvolution2dForwardOutputDim(
+        convolution.get(), input.get(), filter.get(), &n, &c, &h, &w)));
+    RETURN_IF_ERROR_STATUS(GetStatus(cudnnSetTensor4dDescriptor(
+        output.get(), static_cast<cudnnTensorFormat_t>(format),
+        GetTensorDataType(input), n, c, h, w)));
+  } else {
+    // TODO: Support other formats, dilations, strides, group counts.
+    if (format != proto::TENSOR_NCHW) {
+      return ErrorStatus("Can only create NCHW for non-4D output descriptor.");
+    }
+    auto filter_data = GetFilterDescriptorData(filter.get());
+    CHECK_EQ(filter_data.format, CUDNN_TENSOR_NCHW) << "not supported";
+
+    auto conv_data = GetConvolutionDescriptorData(convolution.get());
+    auto all_ones = [&](const int* param) {
+      return std::all_of(param, param + conv_data.rank,
+                         [](int value) { return value == 1; });
+    };
+    CHECK_EQ(all_ones(conv_data.dilation), true) << "not supported";
+    CHECK_EQ(all_ones(conv_data.stride), true) << "not supported";
+    CHECK_EQ(conv_data.group_count, 1) << "not supported";
+
+    int output_dimensions[CUDNN_DIM_MAX] = {input_data.dimensions[0],
+                                            filter_data.dimensions[0]};
+    for (int i = 2; i < input_data.rank; ++i) {
+      output_dimensions[i] = input_data.dimensions[i] +
+                             2 * conv_data.pad[i - 2] -
+                             filter_data.dimensions[i] + 1;
+    }
+    auto output_strides =
+        GetFullyPackedStrides(output_dimensions, input_data.rank);
+    RETURN_IF_ERROR_STATUS(GetStatus(cudnnSetTensorNdDescriptor(
+        output.get(), input_data.data_type, input_data.rank, output_dimensions,
+        output_strides.data())));
+  }
   return {std::move(output)};
 }
 
@@ -773,9 +855,14 @@ Status RunConvolution(const CudnnHandle& handle, const ConvolutionAlgo& algo,
 
   ASSIGN_OR_RETURN_STATUS(auto workspace, AllocateDeviceMemory(workspace_size));
 
-  return RunConvolution(handle, algo, alpha, beta, input_desc, input_data,
-                        filter_desc, filter_data, convolution_desc, output_desc,
-                        output_data, workspace, workspace_size);
+  RETURN_IF_ERROR_STATUS(
+      RunConvolution(handle, algo, alpha, beta, input_desc, input_data,
+                     filter_desc, filter_data, convolution_desc, output_desc,
+                     output_data, workspace, workspace_size));
+
+  // Detect and handle CUDA errors to avoid hitting the CHECK_OK_STATUS when
+  // deallocating the workspace.
+  return GetStatus(cudaDeviceSynchronize());
 }
 
 StatusOr<Convolution> CreateConvolution(const proto::ConvolutionConfig& proto,

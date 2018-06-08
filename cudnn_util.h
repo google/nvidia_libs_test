@@ -139,7 +139,9 @@ ConvolutionDescriptor CreateConvolutionDescriptor(
 bool ConvolutionDescriptorEqual(const ConvolutionDescriptor& left,
                                 const ConvolutionDescriptor& right);
 
-// Creates an 4D output tensor desciptor for the given parameters.
+// Creates an output tensor desciptor for the given parameters. Unless it's a
+// 4D tensor, format must be TENSOR_NCHW and the generated output tensor is
+// fully packed.
 StatusOr<TensorDescriptor> CreateOutputDescriptor(
     const proto::TensorFormat& format, const TensorDescriptor& input,
     const FilterDescriptor& filter, const ConvolutionDescriptor& convolution);
@@ -225,6 +227,8 @@ struct Convolution {
   DeviceMemory output_data;
 };
 
+// Convenience function to create everything needed to run a convolution
+// specified by proto.
 StatusOr<Convolution> CreateConvolution(const proto::ConvolutionConfig& proto,
                                         const RandomGenerator& rand_gen);
 

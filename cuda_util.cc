@@ -34,6 +34,9 @@ Status GetStatus(cudaError_t error) {
   if (error == cudaSuccess) {
     return OkStatus();
   }
+  // Reset CUDA runtime status because we can expect the user to handle the
+  // returned error.
+  cudaGetLastError();
   const char* str = cudaGetErrorString(error);
   return ErrorStatus("CUDA Runtime API error '") << str << "'";
 }
@@ -111,7 +114,7 @@ Status CopyDeviceMemory(const DeviceMemory& dst, const DeviceMemory& src,
 }
 
 void ResetDevice() {
-  cudaGetLastError();  // Reset error status.
+  cudaGetLastError();  // Reset CUDA runtime status.
   CHECK_OK_STATUS(GetStatus(cudaDeviceReset()));
 }
 

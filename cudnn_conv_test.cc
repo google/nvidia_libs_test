@@ -27,6 +27,7 @@
 #include "glog/logging.h"
 #include "google/protobuf/repeated_field.h"
 #include "gtest/gtest.h"
+#include "absl/strings/str_join.h"
 #include "absl/types/optional.h"
 #include "cudnn/include/cudnn.h"
 #include "all_pairs.h"
@@ -256,12 +257,6 @@ proto::ConvolutionConfig GetMergedConvolution(
   }
 
   proto.MergeFrom(from);
-
-  // Always set the convolution fields not wrapped in oneofs.
-  proto.mutable_convolution()->set_mode(from.convolution().mode());
-  proto.mutable_convolution()->set_math_type(from.convolution().math_type());
-  proto.mutable_convolution()->set_group_count(
-      from.convolution().group_count());
 
   return proto;
 }
@@ -537,32 +532,44 @@ TEST_P(ConvolutionTest, GetAlgorithm_v7) {
 
 // Creates a ConvolutionConfig from the given parameters for
 // proto.ConvolutionTest.reference.
-proto::ConvolutionConfig MakeConvolutionConfig(int batch_count, int in_depth,
-                                               int in_height, int in_width,
-                                               int out_depth, int filter_height,
-                                               int filter_width,
+//
+// Note: in_channels and out_channels are multiplied by group_count.
+proto::ConvolutionConfig MakeConvolutionConfig(int batch_count, int in_channels,
+                                               std::vector<int> in_sizes,
+                                               int out_channels,
+                                               std::vector<int> filter_sizes,
+                                               int group_count,
                                                Padding padding) {
   proto::TensorDescriptor input;
-  for (int dim : {batch_count, in_depth, in_height, in_width}) {
+  for (int dim : {batch_count, in_channels * group_count}) {
+    input.add_dimension(dim);
+  }
+  for (int dim : in_sizes) {
     input.add_dimension(dim);
   }
   input.set_format(proto::TENSOR_NCHW);
   input.set_data_type(proto::DATA_DOUBLE);
 
   proto::FilterDescriptor filter;
-  for (int dim : {out_depth, in_depth, filter_height, filter_width}) {
+  for (int dim : {out_channels * group_count, in_channels}) {
+    filter.add_dimension(dim);
+  }
+  for (int dim : filter_sizes) {
     filter.add_dimension(dim);
   }
   filter.set_format(proto::TENSOR_NCHW);
   filter.set_data_type(proto::DATA_DOUBLE);
 
   proto::ConvolutionDescriptor convolution;
-  for (auto filter_dim : {filter_height, filter_width}) {
+  for (auto filter_size : filter_sizes) {
     // SAME padding is only this simple if stride and dilation are 1.
     // TODO: Add function to compute padding for generic stride/dilation.
-    convolution.add_pad(padding == Padding::SAME ? filter_dim / 2 : 0);
+    convolution.add_pad(padding == Padding::SAME ? filter_size / 2 : 0);
   }
   convolution.set_compute_mode(proto::DATA_DOUBLE);
+  if (group_count > 1) {
+    convolution.set_group_count(group_count);
+  }
 
   proto::ConvolutionConfig result;
   *result.mutable_input() = std::move(input);
@@ -592,15 +599,15 @@ SizeRange MakePowerOfTwoRange(int size) {
 // and filter size are clamped so that the filter is no larger then the inputs.
 template <typename RandGen>
 proto::ConvolutionConfig MakeConvolutionConfig(
-    RandGen&& rand_gen, SizeRange batch_count_range, SizeRange in_depth_range,
-    SizeRange in_height_range, SizeRange in_width_range,
-    SizeRange out_depth_range, SizeRange filter_height_range,
-    SizeRange filter_width_range, Padding padding) {
+    RandGen&& rand_gen, SizeRange batch_count_range,
+    SizeRange in_channels_range, std::vector<SizeRange> in_size_ranges,
+    SizeRange out_channels_range, std::vector<SizeRange> filter_size_ranges,
+    SizeRange group_count_range, Padding padding) {
   if (padding == Padding::VALID) {
-    in_height_range.minimum =
-        std::max(in_height_range.minimum, filter_height_range.minimum);
-    in_width_range.minimum =
-        std::max(in_width_range.minimum, filter_width_range.minimum);
+    for (auto& in_size_range : in_size_ranges) {
+      in_size_range.minimum =
+          std::max(in_size_range.minimum, in_size_range.minimum);
+    }
   }
 
   auto randomize = [&](const SizeRange& range) {
@@ -609,27 +616,32 @@ proto::ConvolutionConfig MakeConvolutionConfig(
                                               range.maximum}(rand_gen);
   };
   int batch_count = randomize(batch_count_range);
-  int in_depth = randomize(in_depth_range);
-  int in_height = randomize(in_height_range);
-  int in_width = randomize(in_width_range);
-  int out_depth = randomize(out_depth_range);
+  int in_channels = randomize(in_channels_range);
+  std::vector<int> in_sizes;
+  std::transform(in_size_ranges.begin(), in_size_ranges.end(),
+                 std::back_inserter(in_sizes), randomize);
+  int out_channels = randomize(out_channels_range);
+  int group_count = randomize(group_count_range);
 
   if (padding == Padding::VALID) {
-    filter_height_range.maximum =
-        std::min(filter_height_range.maximum, in_height);
-    filter_width_range.maximum = std::min(filter_width_range.maximum, in_width);
+    for (size_t i = 0; i < filter_size_ranges.size(); ++i) {
+      filter_size_ranges[i].maximum =
+          std::min(filter_size_ranges[i].maximum, in_sizes[i]);
+    }
   }
-  int filter_height = randomize(filter_height_range);
-  int filter_width = randomize(filter_width_range);
+  std::vector<int> filter_sizes;
+  std::transform(filter_size_ranges.begin(), filter_size_ranges.end(),
+                 std::back_inserter(filter_sizes), randomize);
 
   auto result =
-      MakeConvolutionConfig(batch_count, in_depth, in_height, in_width,
-                            out_depth, filter_height, filter_width, padding);
+      MakeConvolutionConfig(batch_count, in_channels, in_sizes, out_channels,
+                            filter_sizes, group_count, padding);
 
   std::ostringstream label;
-  label << batch_count << 'x' << in_depth << 'x' << in_height << 'x' << in_width
-        << '_' << out_depth << 'x' << in_depth << 'x' << filter_height << 'x'
-        << filter_width << '_' << (padding == Padding::SAME ? "SAME" : "VALID");
+  label << batch_count << 'x' << in_channels * group_count << 'x'
+        << absl::StrJoin(in_sizes, "x") << '_' << out_channels * group_count
+        << 'x' << in_channels << 'x' << absl::StrJoin(filter_sizes, "x") << '_'
+        << (padding == Padding::SAME ? "SAME" : "VALID");
   result.set_label(label.str());
 
   return result;
@@ -743,48 +755,66 @@ proto::ConvolutionConfig MakeConvolutionConfig(Config config) {
 // Returns true if cuDNN should handle the given parameters for at least one
 // algorithm. Changes to this function will not just drop some tests, but
 // completely alter the set of generated tests!
-bool ValidateParams(const absl::optional<SizeRange> opt_batch_count,
-                    const absl::optional<SizeRange> opt_in_depth,
-                    const absl::optional<SizeRange> opt_in_height,
-                    const absl::optional<SizeRange> opt_in_width,
-                    const absl::optional<SizeRange> opt_out_depth,
-                    const absl::optional<SizeRange> opt_filter_height,
-                    const absl::optional<SizeRange> opt_filter_width,
-                    const absl::optional<Padding> opt_padding,
-                    const absl::optional<Config> opt_config) {
+//
+// Note: in_channels and out_channels are multiplied with group_count.
+bool ValidateParams(absl::optional<SizeRange> opt_batch_count,
+                    absl::optional<SizeRange> opt_in_channels,
+                    std::vector<absl::optional<SizeRange>> opt_in_sizes,
+                    absl::optional<SizeRange> opt_out_channels,
+                    std::vector<absl::optional<SizeRange>> opt_filter_sizes,
+                    absl::optional<SizeRange> opt_group_count,
+                    absl::optional<Padding> opt_padding,
+                    absl::optional<Config> opt_config) {
   // Default to medium sizes so we don't paint ourselves in a corner.
-  SizeRange image_range{32, 32};
-  SizeRange filter_range{5, 5};
-  SizeRange batch_count = opt_batch_count.value_or(image_range);
-  SizeRange in_depth = opt_in_depth.value_or(image_range);
-  SizeRange in_height = opt_in_height.value_or(image_range);
-  SizeRange in_width = opt_in_width.value_or(image_range);
-  SizeRange out_depth = opt_out_depth.value_or(image_range);
-  SizeRange filter_height = opt_filter_height.value_or(filter_range);
-  SizeRange filter_width = opt_filter_width.value_or(filter_range);
+  SizeRange tensor_range = {32, 32};
+  SizeRange filter_range = {5, 5};
+  SizeRange batch_count = opt_batch_count.value_or(tensor_range);
+  SizeRange out_channels = opt_out_channels.value_or(tensor_range);
+  SizeRange filter_in_channels = opt_in_channels.value_or(tensor_range);
+  SizeRange group_count = opt_group_count.value_or(tensor_range);
   Padding padding = opt_padding.value_or(Padding::SAME);
   Config config = opt_config.value_or(Config::NCHW_FLOAT);
 
+  int in_max_channels = filter_in_channels.maximum * group_count.maximum;
+  int out_max_channels = out_channels.maximum * group_count.maximum;
+
+  std::vector<int> in_max_sizes;
+  for (const auto& opt_in_size : opt_in_sizes) {
+    in_max_sizes.push_back(opt_in_size.value_or(tensor_range).maximum);
+  }
+
+  std::vector<int> filter_min_sizes;
+  std::vector<int> filter_max_sizes;
+  for (const auto& opt_filter_size : opt_filter_sizes) {
+    auto filter_size = opt_filter_size.value_or(filter_range);
+    filter_min_sizes.push_back(filter_size.minimum);
+    filter_max_sizes.push_back(filter_size.maximum);
+  }
+
   size_t million = 1ull << 20;  // 1 million as in MiB.
   size_t max_tensor_elements = static_cast<size_t>(batch_count.maximum) *
-                               std::max(in_depth.maximum, out_depth.maximum) *
-                               in_height.maximum * in_width.maximum;
+                               std::max(in_max_channels, out_max_channels);
+  for (const auto& in_max_size : in_max_sizes) {
+    max_tensor_elements *= in_max_size;
+  }
 
   if (max_tensor_elements >= 2048 * million) {
     // cuDNN has a limit of less (!) than 2G elements per tensor.
     return false;
   }
 
-  if (padding == Padding::VALID && (filter_height.minimum > in_height.maximum ||
-                                    filter_width.minimum > in_height.maximum)) {
-    // VALID padding requires the filter to be no smaller than the input.
-    return false;
+  if (padding == Padding::VALID) {
+    for (size_t i = 0; i < opt_in_sizes.size(); ++i) {
+      if (filter_min_sizes[i] > in_max_sizes[i]) {
+        // VALID padding requires the filter to be no greater than the input.
+        return false;
+      }
+    }
   }
 
-  auto proto = MakeConvolutionConfig(batch_count.maximum, in_depth.maximum,
-                                     in_height.maximum, in_width.maximum,
-                                     out_depth.maximum, filter_height.maximum,
-                                     filter_width.maximum, padding);
+  auto proto = MakeConvolutionConfig(
+      batch_count.maximum, filter_in_channels.maximum, in_max_sizes,
+      out_channels.maximum, filter_max_sizes, group_count.maximum, padding);
 
   auto input = CreateTensorDescriptor(proto.input());
   auto filter = CreateFilterDescriptor(proto.filter());
@@ -814,7 +844,7 @@ bool ValidateParams(const absl::optional<SizeRange> opt_batch_count,
   }
 
   size_t input_num_elements = GetTensorNumElements(input);
-  size_t filter_num_elements = GetFilterNumElements(filter) * sizeof(double);
+  size_t filter_num_elements = GetFilterNumElements(filter);
   size_t output_num_elements = GetTensorNumElements(output_or.ValueOrDie());
 
   size_t sum_num_elements =
@@ -834,19 +864,167 @@ bool ValidateParams(const absl::optional<SizeRange> opt_batch_count,
 
   return true;
 }
+bool ValidateParams2d(absl::optional<SizeRange> opt_batch_count,
+                      absl::optional<SizeRange> opt_in_channels,
+                      absl::optional<SizeRange> opt_in_height,
+                      absl::optional<SizeRange> opt_in_width,
+                      absl::optional<SizeRange> opt_out_channels,
+                      absl::optional<SizeRange> opt_filter_height,
+                      absl::optional<SizeRange> opt_filter_width,
+                      absl::optional<Padding> opt_padding,
+                      absl::optional<Config> opt_config) {
+  SizeRange group_count = {1, 1};
+  return ValidateParams(opt_batch_count, opt_in_channels,
+                        {opt_in_height, opt_in_width}, opt_out_channels,
+                        {opt_filter_height, opt_filter_width}, group_count,
+                        opt_padding, opt_config);
+}
+bool ValidateParams3d(absl::optional<SizeRange> opt_batch_count,
+                      absl::optional<SizeRange> opt_in_channels,
+                      absl::optional<SizeRange> opt_in_depth,
+                      absl::optional<SizeRange> opt_in_height,
+                      absl::optional<SizeRange> opt_in_width,
+                      absl::optional<SizeRange> opt_out_channels,
+                      absl::optional<SizeRange> opt_filter_depth,
+                      absl::optional<SizeRange> opt_filter_height,
+                      absl::optional<SizeRange> opt_filter_width,
+                      absl::optional<Padding> opt_padding,
+                      absl::optional<Config> opt_config) {
+  SizeRange group_count = {1, 1};
+  return ValidateParams(opt_batch_count, opt_in_channels,
+                        {opt_in_depth, opt_in_height, opt_in_width},
+                        opt_out_channels,
+                        {opt_filter_depth, opt_filter_height, opt_filter_width},
+                        group_count, opt_padding, opt_config);
+}
+bool ValidateParamsGrouped(absl::optional<SizeRange> opt_batch_count,
+                           absl::optional<SizeRange> in_channels,
+                           absl::optional<SizeRange> opt_in_height,
+                           absl::optional<SizeRange> opt_in_width,
+                           absl::optional<SizeRange> out_channels,
+                           absl::optional<SizeRange> opt_filter_height,
+                           absl::optional<SizeRange> opt_filter_width,
+                           absl::optional<SizeRange> opt_group_count,
+                           absl::optional<Padding> opt_padding,
+                           absl::optional<Config> opt_config) {
+  return ValidateParams(opt_batch_count, in_channels,
+                        {opt_in_height, opt_in_width}, out_channels,
+                        {opt_filter_height, opt_filter_width}, opt_group_count,
+                        opt_padding, opt_config);
+}
 
-// Returns a list of tests, one for every direction per generated parameter
-// combination.
-google::protobuf::RepeatedPtrField<proto::ConvolutionTest> MakeTests(
-    const std::vector<SizeRange>& filter_sizes) {
-  // Create consecutive closed ranges [2^(k-1)+1, 2^k].
-  std::vector<SizeRange> size_ranges;
-  for (int size : {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048}) {
-    size_ranges.push_back(MakePowerOfTwoRange(size));
+// Factory for proto::ConvolutionTest with one factory method per direction.
+class TestFactory {
+ public:
+  template <typename RandGen>
+  TestFactory(RandGen&& rand_gen, SizeRange batch_count, SizeRange in_channels,
+              std::vector<SizeRange> in_sizes, SizeRange out_channels,
+              std::vector<SizeRange> filter_sizes, SizeRange group_count,
+              Padding padding, Config config) {
+    reference_ =
+        MakeConvolutionConfig(rand_gen, batch_count, in_channels, in_sizes,
+                              out_channels, filter_sizes, group_count, padding);
+
+    test_ = MakeConvolutionConfig(config);
+
+    // Disable tests that are not supported on the host machine.
+    //
+    // Excluding unsupported configs from the parameter vector would make the
+    // supported tests depend on the machine configuration, and that seems
+    // worse than leaving holes in the all-pairs test space on older hardware
+    // and cuDNN versions.
+    disabled_label_ = IsConfigSupported(config) ? "" : "DISABLED_";
+
+    config_label_ = "_" + test_.label() + "_" + reference_.label();
+
+    test_.clear_label();
+    reference_.clear_label();
   }
-  std::vector<SizeRange> batch_counts = size_ranges;
-  std::vector<SizeRange> depths = size_ranges;
-  std::vector<SizeRange> image_sizes = size_ranges;
+
+  proto::ConvolutionTest operator()(proto::ConvolutionFwdAlgo algo) const {
+    // in_channels * filter_height * filter_width.
+    const auto& dims = reference_.filter().dimension();
+    int num_summands = std::accumulate(dims.begin() + 2, dims.end(), dims[1],
+                                       std::multiplies<int>());
+    auto result = MakeTest(proto::CONVOLUTION_FWD, num_summands);
+    result.mutable_reference()->set_fwd_algo(algo);
+    return result;
+  }
+  proto::ConvolutionTest operator()(proto::ConvolutionBwdDataAlgo algo) const {
+    // out_channels * filter_height * filter_width.
+    const auto& dims = reference_.filter().dimension();
+    int num_summands = std::accumulate(dims.begin() + 2, dims.end(), dims[0],
+                                       std::multiplies<int>());
+    auto result = MakeTest(proto::CONVOLUTION_BWD_DATA, num_summands);
+    result.mutable_reference()->set_bwd_data_algo(algo);
+    return result;
+  }
+  proto::ConvolutionTest operator()(
+      proto::ConvolutionBwdFilterAlgo algo) const {
+    // batch_count * in_height * in_width.
+    const auto& dims = reference_.input().dimension();
+    int num_summands = std::accumulate(dims.begin() + 2, dims.end(), dims[0],
+                                       std::multiplies<int>());
+    auto result = MakeTest(proto::CONVOLUTION_BWD_FILTER, num_summands);
+    result.mutable_reference()->set_bwd_filter_algo(algo);
+    return result;
+  }
+
+ private:
+  proto::ConvolutionTest MakeTest(proto::ConvolutionDirection direction,
+                                  size_t num_summands) const {
+    auto reference = reference_;
+
+    string direction_label = proto::ConvolutionDirection_Name(direction);
+    reference.set_label(disabled_label_ + direction_label + config_label_);
+
+    // Scale result so that elements have an expected value of one. This
+    // prevents overflow for half data.
+    reference.set_one_minus_alpha(1.0 - 4.0 / num_summands);
+
+    auto test = test_;
+    test.set_all_algos(direction);
+
+    proto::ConvolutionTest result;
+    *result.mutable_reference() = std::move(reference);
+    *result.add_test() = std::move(test);
+
+    return result;
+  }
+
+  proto::ConvolutionConfig reference_;
+  proto::ConvolutionConfig test_;
+  string disabled_label_;
+  string config_label_;
+};
+
+// Returns standard size ranges for tensor dimensions.
+std::vector<SizeRange> GetTensorSizeRanges() {
+  // Create consecutive closed ranges [2^(k-1)+1, 2^k].
+  std::vector<SizeRange> result;
+  for (int size : {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048}) {
+    result.push_back(MakePowerOfTwoRange(size));
+  }
+  return result;
+}
+
+// Returns standard size ranges for filter dimensions.
+std::vector<SizeRange> GetFilterSizeRanges() {
+  // Create consecutive closed ranges [2^(k-1)+1, 2^k].
+  std::vector<SizeRange> result;
+  for (int size : {1, 2, 4, 8, 16}) {
+    result.push_back(MakePowerOfTwoRange(size));
+  }
+  return result;
+}
+
+// Returns a list of 2D convolution tests, one for every direction per generated
+// parameter combination.
+google::protobuf::RepeatedPtrField<proto::ConvolutionTest> MakeTests2d(
+    const std::vector<SizeRange>& filter_sizes) {
+  std::vector<SizeRange> batch_counts = GetTensorSizeRanges();
+  std::vector<SizeRange> channel_counts = GetTensorSizeRanges();
+  std::vector<SizeRange> image_sizes = GetTensorSizeRanges();
   std::vector<Padding> paddings{Padding::SAME, Padding::VALID};
   std::vector<Config> configs{Config::NCHW_FLOAT,       Config::NCHW_DOUBLE,
                               Config::NCHW_PSEUDO_HALF, Config::NCHW_TRUE_HALF,
@@ -854,81 +1032,116 @@ google::protobuf::RepeatedPtrField<proto::ConvolutionTest> MakeTests(
                               Config::NHWC_PSEUDO_HALF};
 
   CudnnHandle handle = CreateCudnnHandle();
-  auto validator = MakeCallWithTuple(ValidateParams);
+  auto validator = MakeCallWithTuple(ValidateParams2d);
 
   std::mt19937 rand_gen{GetRandomSeed()};
-  auto params_vec = MakeAllPairs(rand_gen, validator, batch_counts, depths,
-                                 image_sizes, image_sizes, depths, filter_sizes,
-                                 filter_sizes, paddings, configs);
+  auto params_vec =
+      MakeAllPairs(rand_gen, validator, batch_counts, channel_counts,
+                   image_sizes, image_sizes, channel_counts, filter_sizes,
+                   filter_sizes, paddings, configs);
 
   google::protobuf::RepeatedPtrField<proto::ConvolutionTest> conv_tests;
   for (const auto& params : params_vec) {
-    MakeCallWithTuple([&](SizeRange batch_count, SizeRange in_depth,
+    MakeCallWithTuple(
+        [&](SizeRange batch_count, SizeRange in_channels, SizeRange in_height,
+            SizeRange in_width, SizeRange out_channels, SizeRange filter_height,
+            SizeRange filter_width, Padding padding, Config config) {
+          SizeRange group_count = {1, 1};
+          TestFactory factory(rand_gen, batch_count, in_channels,
+                              {in_height, in_width}, out_channels,
+                              {filter_height, filter_width}, group_count,
+                              padding, config);
+          // Add convolution_test for each direction.
+          *conv_tests.Add() =
+              factory(proto::CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM);
+          *conv_tests.Add() = factory(proto::CONVOLUTION_BWD_DATA_ALGO_1);
+          *conv_tests.Add() = factory(proto::CONVOLUTION_BWD_FILTER_ALGO_1);
+        })(params);
+  }
+
+  return conv_tests;
+}
+
+// Returns a list of 3D convolution tests.
+google::protobuf::RepeatedPtrField<proto::ConvolutionTest> MakeTests3d() {
+  std::vector<SizeRange> batch_counts = GetTensorSizeRanges();
+  std::vector<SizeRange> channel_counts = GetTensorSizeRanges();
+  std::vector<SizeRange> image_sizes = GetTensorSizeRanges();
+  std::vector<SizeRange> filter_sizes = GetFilterSizeRanges();
+  std::vector<Padding> paddings{Padding::SAME, Padding::VALID};
+  std::vector<Config> configs{Config::NCHW_FLOAT, Config::NCHW_DOUBLE,
+                              Config::NCHW_PSEUDO_HALF, Config::NCHW_TRUE_HALF,
+                              Config::NCHW_TENSOR_OP};
+
+  CudnnHandle handle = CreateCudnnHandle();
+  auto validator = MakeCallWithTuple(ValidateParams3d);
+
+  std::mt19937 rand_gen{GetRandomSeed()};
+  auto params_vec =
+      MakeAllPairs(rand_gen, validator, batch_counts, channel_counts,
+                   image_sizes, image_sizes, image_sizes, channel_counts,
+                   filter_sizes, filter_sizes, filter_sizes, paddings, configs);
+
+  google::protobuf::RepeatedPtrField<proto::ConvolutionTest> conv_tests;
+  for (const auto& params : params_vec) {
+    MakeCallWithTuple(
+        [&](SizeRange batch_count, SizeRange in_channels, SizeRange in_depth,
+            SizeRange in_height, SizeRange in_width, SizeRange out_channels,
+            SizeRange filter_depth, SizeRange filter_height,
+            SizeRange filter_width, Padding padding, Config config) {
+          SizeRange group_count = {1, 1};
+          TestFactory factory(rand_gen, batch_count, in_channels,
+                              {in_depth, in_height, in_width}, out_channels,
+                              {filter_depth, filter_height, filter_width},
+                              group_count, padding, config);
+          // Add convolution_test for each direction.
+          *conv_tests.Add() =
+              factory(proto::CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM);
+          *conv_tests.Add() = factory(proto::CONVOLUTION_BWD_DATA_ALGO_0);
+          *conv_tests.Add() = factory(proto::CONVOLUTION_BWD_FILTER_ALGO_0);
+        })(params);
+  }
+
+  return conv_tests;
+}
+
+// Returns a list of grouped convolution tests.
+google::protobuf::RepeatedPtrField<proto::ConvolutionTest> MakeTestsGrouped() {
+  std::vector<SizeRange> batch_counts = GetTensorSizeRanges();
+  std::vector<SizeRange> channel_counts = GetTensorSizeRanges();
+  std::vector<SizeRange> image_sizes = GetTensorSizeRanges();
+  std::vector<SizeRange> filter_sizes = GetFilterSizeRanges();
+  std::vector<SizeRange> group_counts = GetTensorSizeRanges();
+  std::vector<Padding> paddings{Padding::SAME, Padding::VALID};
+  std::vector<Config> configs{Config::NCHW_FLOAT, Config::NCHW_DOUBLE,
+                              Config::NCHW_PSEUDO_HALF, Config::NCHW_TRUE_HALF,
+                              Config::NCHW_TENSOR_OP};
+
+  CudnnHandle handle = CreateCudnnHandle();
+  auto validator = MakeCallWithTuple(ValidateParamsGrouped);
+
+  std::mt19937 rand_gen{GetRandomSeed()};
+  auto params_vec =
+      MakeAllPairs(rand_gen, validator, batch_counts, channel_counts,
+                   image_sizes, image_sizes, channel_counts, filter_sizes,
+                   filter_sizes, group_counts, paddings, configs);
+
+  google::protobuf::RepeatedPtrField<proto::ConvolutionTest> conv_tests;
+  for (const auto& params : params_vec) {
+    MakeCallWithTuple([&](SizeRange batch_count, SizeRange in_channels,
                           SizeRange in_height, SizeRange in_width,
-                          SizeRange out_depth, SizeRange filter_height,
-                          SizeRange filter_width, Padding padding,
-                          Config config) {
-      proto::ConvolutionTest conv_test;
-
-      *conv_test.mutable_reference() = MakeConvolutionConfig(
-          rand_gen, batch_count, in_depth, in_height, in_width, out_depth,
-          filter_height, filter_width, padding);
-
-      *conv_test.add_test() = MakeConvolutionConfig(config);
-
-      // Disable tests that are not supported in the current configuration.
-      // Excluding unsupported configs from the parameter vector would make the
-      // supported tests depend on the machine configuration, and that seems
-      // worse than leaving holes in the all-pairs test space on older hardware
-      // and cuDNN versions.
-      string label_prefix = IsConfigSupported(config) ? "" : "DISABLED_";
-      string label_postfix =
-          "_" + conv_test.test(0).label() + "_" + conv_test.reference().label();
-
+                          SizeRange out_channels, SizeRange filter_height,
+                          SizeRange filter_width, SizeRange group_count,
+                          Padding padding, Config config) {
+      TestFactory factory(rand_gen, batch_count, in_channels,
+                          {in_height, in_width}, out_channels,
+                          {filter_height, filter_width}, group_count, padding,
+                          config);
       // Add convolution_test for each direction.
-      for (auto direction :
-           {proto::CONVOLUTION_FWD, proto::CONVOLUTION_BWD_DATA,
-            proto::CONVOLUTION_BWD_FILTER}) {
-        string direction_name = proto::ConvolutionDirection_Name(direction);
-        conv_test.mutable_reference()->set_label(label_prefix + direction_name +
-                                                 label_postfix);
-
-        auto& input_dim = conv_test.reference().input().dimension();
-        auto& filter_dim = conv_test.reference().filter().dimension();
-        size_t num_summands;
-        switch (direction) {
-          case proto::CONVOLUTION_FWD:
-            conv_test.mutable_reference()->set_fwd_algo(
-                proto::CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM);
-            // in_depth * filter_height * filter_width.
-            num_summands = filter_dim[1] * filter_dim[2] * filter_dim[3];
-            break;
-          case proto::CONVOLUTION_BWD_DATA:
-            conv_test.mutable_reference()->set_bwd_data_algo(
-                proto::CONVOLUTION_BWD_DATA_ALGO_1);
-            // out_depth * filter_height * filter_width.
-            num_summands = filter_dim[0] * filter_dim[2] * filter_dim[3];
-            break;
-          case proto::CONVOLUTION_BWD_FILTER:
-            conv_test.mutable_reference()->set_bwd_filter_algo(
-                proto::CONVOLUTION_BWD_FILTER_ALGO_1);
-            // batch_count * in_height * in_width.
-            num_summands = input_dim[0] * input_dim[2] * input_dim[3];
-            break;
-          default:
-            LOG(FATAL) << "Invalid direction: " << direction_name;
-        }
-        // Scale result so that elements have an expected value of one. This
-        // prevents overflow for half data.
-        conv_test.mutable_reference()->set_one_minus_alpha(1.0 -
-                                                           4.0 / num_summands);
-
-        for (auto& test : *conv_test.mutable_test()) {
-          test.set_all_algos(direction);
-        }
-
-        *conv_tests.Add() = conv_test;
-      }
+      *conv_tests.Add() =
+          factory(proto::CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM);
+      *conv_tests.Add() = factory(proto::CONVOLUTION_BWD_DATA_ALGO_0);
+      *conv_tests.Add() = factory(proto::CONVOLUTION_BWD_FILTER_ALGO_0);
     })(params);
   }
 
@@ -944,25 +1157,37 @@ INSTANTIATE_TEST_CASE_P(
     ::testing::ValuesIn(GetCudnnTestsFromFile().convolution_test()),
     GetTestName);
 
-INSTANTIATE_TEST_CASE_P(Filter3x3, ConvolutionTest, ::testing::ValuesIn([] {
+INSTANTIATE_TEST_CASE_P(Conv2dFilter3x3, ConvolutionTest,
+                        ::testing::ValuesIn([] {
                           std::vector<SizeRange> filter_sizes{{3, 3}};
-                          return MakeTests(filter_sizes);
+                          return MakeTests2d(filter_sizes);
                         }()),
                         GetTestName);
 
-INSTANTIATE_TEST_CASE_P(Filter5x5, ConvolutionTest, ::testing::ValuesIn([] {
+INSTANTIATE_TEST_CASE_P(Conv2dFilter5x5, ConvolutionTest,
+                        ::testing::ValuesIn([] {
                           std::vector<SizeRange> filter_sizes{{5, 5}};
-                          return MakeTests(filter_sizes);
+                          return MakeTests2d(filter_sizes);
                         }()),
                         GetTestName);
 
-INSTANTIATE_TEST_CASE_P(FilterOther, ConvolutionTest, ::testing::ValuesIn([] {
-                          std::vector<SizeRange> filter_sizes;
-                          for (int size : {1, 2, 4, 8, 16}) {
-                            filter_sizes.push_back(MakePowerOfTwoRange(size));
-                          }
-                          return MakeTests(filter_sizes);
+INSTANTIATE_TEST_CASE_P(Conv2dFilterOther, ConvolutionTest,
+                        ::testing::ValuesIn([] {
+                          auto filter_sizes = GetFilterSizeRanges();
+                          return MakeTests2d(filter_sizes);
                         }()),
                         GetTestName);
+
+INSTANTIATE_TEST_CASE_P(Conv3d, ConvolutionTest,
+                        ::testing::ValuesIn([] { return MakeTests3d(); }()),
+                        GetTestName);
+
+#if CUDNN_MAJOR >= 7
+INSTANTIATE_TEST_CASE_P(Conv2dGrouped, ConvolutionTest, ::testing::ValuesIn([] {
+                          return MakeTestsGrouped();
+                        }()),
+                        GetTestName);
+#endif  // CUDNN_MAJOR >= 7
+
 }  // namespace
 }  // namespace nvidia_libs_test

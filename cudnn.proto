@@ -102,7 +102,9 @@ message TensorDescriptor {
   }
 
   oneof format_oneof {
-    TensorFormat format = 3;  // Rank must be 4 if specified.
+    // For ranks other than 4, only TENSOR_NCHW (corresponding to fully packed)
+    // is supported.
+    TensorFormat format = 3;
   }
   // Must be empty if format is specified, otherwise must have same length as
   // dimension.
@@ -132,8 +134,14 @@ message ConvolutionDescriptor {
     DataType compute_mode = 4;
   }
 
-  ConvolutionMode mode = 5;
-  MathType math_type = 6;  // TENSOR_OP_MATH requires cuDNN 7.
+  oneof mode_oneof {
+    ConvolutionMode mode = 5;
+  }
+
+  oneof math_type_oneof {
+    MathType math_type = 6;  // TENSOR_OP_MATH requires cuDNN 7.
+  }
+
   int32 group_count = 7;   // >1 requires cuDNN 7.
 }
 
