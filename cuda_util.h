@@ -43,6 +43,15 @@ Status GetStatus(cudaError_t);
 // Returns Status from CUPTI status.
 Status GetStatus(CUptiResult);
 
+namespace detail {
+struct HostMemoryDeleter {
+  void operator()(void*) const;
+};
+}  // namespace detail
+
+// RAII wrapper for host memory.
+using HostMemory = std::unique_ptr<void, detail::HostMemoryDeleter>;
+
 // Represents memory allocated on device. Interface is similar to unique_ptr.
 class DeviceMemory {
  public:
@@ -53,6 +62,7 @@ class DeviceMemory {
   DeviceMemory& operator=(DeviceMemory&&);
 
   void* get() const { return ptr_; }
+  size_t size() const { return size_; }
 
  private:
   friend StatusOr<DeviceMemory> AllocateDeviceMemory(size_t);
@@ -66,6 +76,7 @@ void InitializeCurandState(void* state, size_t seed);
 void InitializeDeviceData(float* ptr, size_t num_elements, void* state);
 void InitializeDeviceData(double* ptr, size_t num_elements, void* state);
 void InitializeDeviceData(__half* ptr, size_t num_elements, void* state);
+void FillDeviceWithGarbageImpl(void* ptr, size_t num_bytes);
 }  // namespace detail
 
 // Random number generator for device data.
@@ -81,8 +92,19 @@ class RandomGenerator {
   DeviceMemory state_;
 };
 
+// Allocates size bytes of host memory.
+StatusOr<HostMemory> AllocateHostMemory(size_t size);
+
+// Returns device pointer equivalent of host_ptr.
+void* GetDevicePointer(const HostMemory& host_ptr);
+
 // Allocates size bytes of device memory.
 StatusOr<DeviceMemory> AllocateDeviceMemory(size_t size);
+
+// Fill the device memory with garbage data.
+inline void FillDeviceWithGarbage(const DeviceMemory& mem) {
+  detail::FillDeviceWithGarbageImpl(mem.get(), mem.size());
+}
 
 // Returns amount of bytes allocated through AllocateDeviceMemory.
 size_t GetAllocatedDeviceMemoryBytes();

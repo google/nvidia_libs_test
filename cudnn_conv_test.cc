@@ -198,10 +198,23 @@ std::vector<ConvolutionAlgo> GetAlgorithms(
 Status RunConvolution(double alpha, double beta, const CudnnHandle& handle,
                       const Convolution& convolution,
                       const ConvolutionAlgo& algo) {
-  return RunConvolution(handle, algo, alpha, beta, convolution.input_desc,
-                        convolution.input_data, convolution.filter_desc,
-                        convolution.filter_data, convolution.conv_desc,
-                        convolution.output_desc, convolution.output_data);
+  ASSIGN_OR_RETURN_STATUS(
+      auto workspace_size,
+      GetWorkspaceSize(handle, convolution.input_desc, convolution.filter_desc,
+                       convolution.conv_desc, convolution.output_desc, algo));
+
+  ASSIGN_OR_RETURN_STATUS(auto workspace, AllocateDeviceMemory(workspace_size));
+  FillDeviceWithGarbage(workspace);
+
+  RETURN_IF_ERROR_STATUS(RunConvolution(
+      handle, algo, alpha, beta, convolution.input_desc, convolution.input_data,
+      convolution.filter_desc, convolution.filter_data, convolution.conv_desc,
+      convolution.output_desc, convolution.output_data, workspace,
+      workspace_size));
+
+  // Detect and handle CUDA errors to avoid hitting the CHECK_OK_STATUS when
+  // deallocating the workspace.
+  return GetStatus(cudaDeviceSynchronize());
 }
 
 // Returns 'from' merged into 'proto', handling repeated and oneof fields.
@@ -656,7 +669,8 @@ enum class Config {
   NCHW_TRUE_HALF,
   NCHW_TENSOR_OP,
   NHWC_FLOAT,
-  NHWC_PSEUDO_HALF
+  NHWC_PSEUDO_HALF,
+  NHWC_TRUE_HALF
 };
 
 // Returns whether cuDNN supports the given config on the current device.
@@ -674,6 +688,8 @@ bool IsConfigSupported(Config config) {
     case Config::NHWC_PSEUDO_HALF:
       // Crashes on cuDNN 6, see cudnn_tests.textproto.
       return CUDNN_MAJOR >= 7 && DeviceSupportsReducedPrecision();
+    case Config::NHWC_TRUE_HALF:
+      return DeviceSupportsReducedPrecision();
     default:
       return true;
   }
@@ -736,6 +752,13 @@ proto::ConvolutionConfig MakeConvolutionConfig(Config config) {
       compute_mode = proto::DATA_FLOAT;
       math_type = proto::DEFAULT_MATH;
       label = "NHWC_PSEUDO_HALF";
+      break;
+    case Config::NHWC_TRUE_HALF:
+      format = proto::TENSOR_NHWC;
+      data_type = proto::DATA_HALF;
+      compute_mode = proto::DATA_HALF;
+      math_type = proto::DEFAULT_MATH;
+      label = "NHWC_TRUE_HALF";
       break;
     default:
       LOG(FATAL) << "Unknown config";
@@ -1025,16 +1048,17 @@ google::protobuf::RepeatedPtrField<proto::ConvolutionTest> MakeTests2d(
   std::vector<SizeRange> batch_counts = GetTensorSizeRanges();
   std::vector<SizeRange> channel_counts = GetTensorSizeRanges();
   std::vector<SizeRange> image_sizes = GetTensorSizeRanges();
-  std::vector<Padding> paddings{Padding::SAME, Padding::VALID};
-  std::vector<Config> configs{Config::NCHW_FLOAT,       Config::NCHW_DOUBLE,
-                              Config::NCHW_PSEUDO_HALF, Config::NCHW_TRUE_HALF,
-                              Config::NCHW_TENSOR_OP,   Config::NHWC_FLOAT,
-                              Config::NHWC_PSEUDO_HALF};
+  std::vector<Padding> paddings = {Padding::SAME, Padding::VALID};
+  std::vector<Config> configs = {
+      Config::NCHW_FLOAT,       Config::NCHW_DOUBLE,
+      Config::NCHW_PSEUDO_HALF, Config::NCHW_TRUE_HALF,
+      Config::NCHW_TENSOR_OP,   Config::NHWC_FLOAT,
+      Config::NHWC_PSEUDO_HALF, Config::NHWC_TRUE_HALF};
 
   CudnnHandle handle = CreateCudnnHandle();
   auto validator = MakeCallWithTuple(ValidateParams2d);
 
-  std::mt19937 rand_gen{GetRandomSeed()};
+  std::mt19937 rand_gen(GetRandomSeed());
   auto params_vec =
       MakeAllPairs(rand_gen, validator, batch_counts, channel_counts,
                    image_sizes, image_sizes, channel_counts, filter_sizes,
@@ -1068,15 +1092,15 @@ google::protobuf::RepeatedPtrField<proto::ConvolutionTest> MakeTests3d() {
   std::vector<SizeRange> channel_counts = GetTensorSizeRanges();
   std::vector<SizeRange> image_sizes = GetTensorSizeRanges();
   std::vector<SizeRange> filter_sizes = GetFilterSizeRanges();
-  std::vector<Padding> paddings{Padding::SAME, Padding::VALID};
-  std::vector<Config> configs{Config::NCHW_FLOAT, Config::NCHW_DOUBLE,
-                              Config::NCHW_PSEUDO_HALF, Config::NCHW_TRUE_HALF,
-                              Config::NCHW_TENSOR_OP};
+  std::vector<Padding> paddings = {Padding::SAME, Padding::VALID};
+  std::vector<Config> configs = {
+      Config::NCHW_FLOAT, Config::NCHW_DOUBLE, Config::NCHW_PSEUDO_HALF,
+      Config::NCHW_TRUE_HALF, Config::NCHW_TENSOR_OP};
 
   CudnnHandle handle = CreateCudnnHandle();
   auto validator = MakeCallWithTuple(ValidateParams3d);
 
-  std::mt19937 rand_gen{GetRandomSeed()};
+  std::mt19937 rand_gen(GetRandomSeed());
   auto params_vec =
       MakeAllPairs(rand_gen, validator, batch_counts, channel_counts,
                    image_sizes, image_sizes, image_sizes, channel_counts,
@@ -1112,15 +1136,15 @@ google::protobuf::RepeatedPtrField<proto::ConvolutionTest> MakeTestsGrouped() {
   std::vector<SizeRange> image_sizes = GetTensorSizeRanges();
   std::vector<SizeRange> filter_sizes = GetFilterSizeRanges();
   std::vector<SizeRange> group_counts = GetTensorSizeRanges();
-  std::vector<Padding> paddings{Padding::SAME, Padding::VALID};
-  std::vector<Config> configs{Config::NCHW_FLOAT, Config::NCHW_DOUBLE,
-                              Config::NCHW_PSEUDO_HALF, Config::NCHW_TRUE_HALF,
-                              Config::NCHW_TENSOR_OP};
+  std::vector<Padding> paddings = {Padding::SAME, Padding::VALID};
+  std::vector<Config> configs = {
+      Config::NCHW_FLOAT, Config::NCHW_DOUBLE, Config::NCHW_PSEUDO_HALF,
+      Config::NCHW_TRUE_HALF, Config::NCHW_TENSOR_OP};
 
   CudnnHandle handle = CreateCudnnHandle();
   auto validator = MakeCallWithTuple(ValidateParamsGrouped);
 
-  std::mt19937 rand_gen{GetRandomSeed()};
+  std::mt19937 rand_gen(GetRandomSeed());
   auto params_vec =
       MakeAllPairs(rand_gen, validator, batch_counts, channel_counts,
                    image_sizes, image_sizes, channel_counts, filter_sizes,
@@ -1159,14 +1183,14 @@ INSTANTIATE_TEST_CASE_P(
 
 INSTANTIATE_TEST_CASE_P(Conv2dFilter3x3, ConvolutionTest,
                         ::testing::ValuesIn([] {
-                          std::vector<SizeRange> filter_sizes{{3, 3}};
+                          std::vector<SizeRange> filter_sizes = {{3, 3}};
                           return MakeTests2d(filter_sizes);
                         }()),
                         GetTestName);
 
 INSTANTIATE_TEST_CASE_P(Conv2dFilter5x5, ConvolutionTest,
                         ::testing::ValuesIn([] {
-                          std::vector<SizeRange> filter_sizes{{5, 5}};
+                          std::vector<SizeRange> filter_sizes = {{5, 5}};
                           return MakeTests2d(filter_sizes);
                         }()),
                         GetTestName);

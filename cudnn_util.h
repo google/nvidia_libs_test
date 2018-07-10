@@ -148,16 +148,9 @@ StatusOr<TensorDescriptor> CreateOutputDescriptor(
 
 // Returns the proto's output tensor if one is present, otherwise forwards to
 // the function above.
-template <typename T>
 StatusOr<TensorDescriptor> CreateOutputDescriptor(
-    const T& proto, const TensorDescriptor& input,
-    const FilterDescriptor& filter, const ConvolutionDescriptor& convolution) {
-  if (proto.has_output()) {
-    return CreateTensorDescriptor(proto.output());
-  }
-  return CreateOutputDescriptor(proto.input().format(), input, filter,
-                                convolution);
-}
+    const proto::ConvolutionConfig& proto, const TensorDescriptor& input,
+    const FilterDescriptor& filter, const ConvolutionDescriptor& convolution);
 
 // Returns the number of bytes in device_memory_limit_mb flag that have not yet
 // been allocated through AllocateDeviceMemory().
@@ -205,17 +198,6 @@ Status RunConvolution(const CudnnHandle& handle, const ConvolutionAlgo& algo,
                       const TensorDescriptor& output_desc,
                       const DeviceMemory& output_data,
                       const DeviceMemory& workspace, size_t workspace_size);
-
-// Same as above, but allocates workspace.
-Status RunConvolution(const CudnnHandle& handle, const ConvolutionAlgo& algo,
-                      double alpha, double beta,
-                      const TensorDescriptor& input_desc,
-                      const DeviceMemory& input_data,
-                      const FilterDescriptor& filter_desc,
-                      const DeviceMemory& filter_data,
-                      const ConvolutionDescriptor& convolution_desc,
-                      const TensorDescriptor& output_desc,
-                      const DeviceMemory& output_data);
 
 struct Convolution {
   TensorDescriptor input_desc;

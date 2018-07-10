@@ -56,6 +56,12 @@ RandomGenerator::RandomGenerator(size_t seed)
   detail::InitializeCurandState(state_.get(), seed);
 }
 
+namespace detail {
+void HostMemoryDeleter::operator()(void* ptr) const {
+  CHECK_OK_STATUS(GetStatus(cudaFreeHost(ptr)));
+}
+}  // namespace detail
+
 DeviceMemory::DeviceMemory(std::nullptr_t) : ptr_(nullptr), size_(0) {}
 
 DeviceMemory::DeviceMemory(DeviceMemory&& other) noexcept
@@ -86,8 +92,21 @@ DeviceMemory::~DeviceMemory() {
   CHECK_OK_STATUS(GetStatus(cudaFree(ptr_)));
 }
 
+StatusOr<HostMemory> AllocateHostMemory(size_t size) {
+  void* result;
+  RETURN_IF_ERROR_STATUS(GetStatus(cudaMallocHost(&result, size)));
+  return HostMemory(result);
+}
+
+void* GetDevicePointer(const HostMemory& host_ptr) {
+  void* dev_ptr;
+  CHECK_OK_STATUS(
+      GetStatus(cudaHostGetDevicePointer(&dev_ptr, host_ptr.get(), 0)));
+  return dev_ptr;
+}
+
 StatusOr<DeviceMemory> AllocateDeviceMemory(size_t size) {
-  DeviceMemory result{nullptr};
+  DeviceMemory result(nullptr);
   cudaError_t error = cudaMalloc(&result.ptr_, size);
   auto status = GetStatus(error);
   if (error == cudaErrorMemoryAllocation) {

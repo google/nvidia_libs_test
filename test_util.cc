@@ -73,24 +73,12 @@ Status DeviceDataEqual(const DeviceType* dev_first,
     return ErrorStatus("nullptr argument");
   }
 
-  struct HostPointerDeleter {
-    void operator()(HostType* ptr) {
-      CHECK_OK_STATUS(GetStatus(cudaFreeHost(ptr)));
-    }
-  };
-  using HostPointer = std::unique_ptr<HostType[], HostPointerDeleter>;
+  ASSIGN_OR_RETURN_STATUS(
+      auto host_buffer,
+      AllocateHostMemory(2 * num_buffer_elements * sizeof(HostType)));
 
-  auto allocate_host_data = [](size_t num_elements) -> StatusOr<HostPointer> {
-    HostType* ptr = nullptr;
-    RETURN_IF_ERROR_STATUS(
-        GetStatus(cudaMallocHost(&ptr, num_elements * sizeof(HostType))));
-    return HostPointer{ptr};
-  };
-
-  ASSIGN_OR_RETURN_STATUS(auto buf_first,
-                          allocate_host_data(num_buffer_elements));
-  ASSIGN_OR_RETURN_STATUS(auto buf_second,
-                          allocate_host_data(num_buffer_elements));
+  auto buf_first = static_cast<HostType*>(host_buffer.get());
+  auto buf_second = buf_first + num_buffer_elements;
 
   struct Diff {
     size_t index;
@@ -109,8 +97,8 @@ Status DeviceDataEqual(const DeviceType* dev_first,
   size_t num_failures = 0;
   for (size_t i = 0; i < num_elements; i += num_buffer_elements) {
     size_t n = std::min(num_buffer_elements, num_elements - i);
-    RETURN_IF_ERROR_STATUS(CopyToHost(buf_first.get(), dev_first, n));
-    RETURN_IF_ERROR_STATUS(CopyToHost(buf_second.get(), dev_second, n));
+    RETURN_IF_ERROR_STATUS(CopyToHost(buf_first, dev_first, n));
+    RETURN_IF_ERROR_STATUS(CopyToHost(buf_second, dev_second, n));
     RETURN_IF_ERROR_STATUS(GetStatus(cudaDeviceSynchronize()));
 
     for (size_t j = 0; j < n; ++j) {

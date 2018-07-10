@@ -320,7 +320,6 @@ convolution_test {
   }
 }
 
-
 # Checks that the testing code handles beta > 0 correctly.
 convolution_test {
   reference {
@@ -396,3 +395,56 @@ convolution_test {
   }
 }
 
+# This test fails because TENSOR_OP_MATH + CONVOLUTION_BWD_DATA_ALGO_1
+# incorrectly assumes a zero-initialized workspace. The bug reproduces on
+# TITAN V with CUDA 9.0 and cuDNN 7.1.4.
+convolution_test {
+  reference {
+    input {
+      dimension: 128
+      dimension: 1024
+      dimension: 14
+      dimension: 14
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    filter {
+      dimension: 2048
+      dimension: 1024
+      dimension: 1
+      dimension: 1
+      data_type: DATA_HALF
+      format: TENSOR_NCHW
+    }
+    output {
+      dimension: 128
+      dimension: 2048
+      dimension: 7
+      dimension: 7
+      data_type: DATA_HALF
+      format: TENSOR_NCHW
+    }
+    convolution {
+      pad: 0
+      pad: 0
+      filter_stride: 2
+      filter_stride: 2
+      compute_mode: DATA_FLOAT
+      math_type: DEFAULT_MATH
+      mode: CROSS_CORRELATION
+    }
+    bwd_data_algo: CONVOLUTION_BWD_DATA_ALGO_0
+    label: "GarbageInWorkspace"
+  }
+  test {
+    convolution { math_type: TENSOR_OP_MATH }
+    all_algos: CONVOLUTION_BWD_DATA
+  }
+  test {
+    input { format: TENSOR_NHWC }
+    filter { format: TENSOR_NHWC }
+    output { format: TENSOR_NHWC }
+    convolution { math_type: TENSOR_OP_MATH }
+    all_algos: CONVOLUTION_BWD_DATA
+  }
+}

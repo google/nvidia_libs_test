@@ -113,14 +113,14 @@ void ConvolutionDescriptorDeleter::operator()(
 CudnnHandle CreateCudnnHandle() {
   cudnnHandle_t result;
   CHECK_OK_STATUS(GetStatus(cudnnCreate(&result)));
-  return CudnnHandle{result};
+  return CudnnHandle(result);
 }
 
 namespace {
 TensorDescriptor CreateTensorDescriptor() {
   cudnnTensorDescriptor_t result;
   CHECK_OK_STATUS(GetStatus(cudnnCreateTensorDescriptor(&result)));
-  return TensorDescriptor{result};
+  return TensorDescriptor(result);
 }
 
 // Returns the strides for a fully packed tensor.
@@ -240,7 +240,7 @@ namespace {
 FilterDescriptor CreateFilterDescriptor() {
   cudnnFilterDescriptor_t result;
   CHECK_OK_STATUS(GetStatus(cudnnCreateFilterDescriptor(&result)));
-  return FilterDescriptor{result};
+  return FilterDescriptor(result);
 }
 }  // namespace
 
@@ -310,7 +310,7 @@ namespace {
 ConvolutionDescriptor CreateConvolutionDescriptor() {
   cudnnConvolutionDescriptor_t result;
   CHECK_OK_STATUS(GetStatus(cudnnCreateConvolutionDescriptor(&result)));
-  return ConvolutionDescriptor{result};
+  return ConvolutionDescriptor(result);
 }
 
 #if CUDNN_MAJOR < 7
@@ -468,6 +468,16 @@ StatusOr<TensorDescriptor> CreateOutputDescriptor(
   return {std::move(output)};
 }
 
+StatusOr<TensorDescriptor> CreateOutputDescriptor(
+    const proto::ConvolutionConfig& proto, const TensorDescriptor& input,
+    const FilterDescriptor& filter, const ConvolutionDescriptor& convolution) {
+  if (proto.has_output()) {
+    return CreateTensorDescriptor(proto.output());
+  }
+  return CreateOutputDescriptor(proto.input().format(), input, filter,
+                                convolution);
+}
+
 size_t GetAvailableDeviceMemoryBytes() {
   size_t allocated = GetAllocatedDeviceMemoryBytes();
   return std::max(device_memory_limit_bytes, allocated) - allocated;
@@ -571,7 +581,7 @@ StatusOr<ConvolutionAlgo> ToConvolutionAlgo(const T& algo_perf,
   if (!num_algorithms || algo_perf.status != CUDNN_STATUS_SUCCESS) {
     return ErrorStatus("No supported algorithm");
   }
-  return ConvolutionAlgo{algo_perf.algo};
+  return ConvolutionAlgo(algo_perf.algo);
 }
 }  // namespace
 
@@ -725,32 +735,40 @@ Status ConvertAndTransformTensor(const CudnnHandle& handle, double alpha,
 }
 
 namespace {
-struct PrintVisitor {
+class PrintVisitor {
+ public:
+  PrintVisitor(std::ostringstream* oss, size_t size_in_bytes)
+      : oss_(oss), size_in_bytes_(size_in_bytes) {}
+
   template <typename T>
   void operator()(T* device_ptr) {
-    size_t num_elements = size_in_bytes / sizeof(T);
-    std::unique_ptr<T[]> host_ptr{new T[num_elements]};
+    size_t num_elements = size_in_bytes_ / sizeof(T);
+    std::unique_ptr<T[]> host_ptr(new T[num_elements]);
     CHECK_OK_STATUS(GetStatus(cudaMemcpy(
-        host_ptr.get(), device_ptr, size_in_bytes, cudaMemcpyDeviceToHost)));
-  }
-
-  void operator()(__half* device_ptr) {
-    size_t num_elements = size_in_bytes / sizeof(__half);
-    std::unique_ptr<float[]> host_ptr{new float[num_elements]};
-    ConvertDeviceData(1.0, host_ptr.get(), device_ptr, num_elements);
+        host_ptr.get(), device_ptr, size_in_bytes_, cudaMemcpyDeviceToHost)));
     Print(host_ptr.get(), num_elements);
   }
 
+  void operator()(__half* device_ptr) {
+    size_t num_elements = size_in_bytes_ / sizeof(__half);
+    auto host_memory = std::move(
+        AllocateHostMemory(num_elements * sizeof(float)).ValueOrDie());
+    auto host_ptr = static_cast<float*>(host_memory.get());
+    ConvertDeviceData(1.0, host_ptr, device_ptr, num_elements);
+    Print(host_ptr, num_elements);
+  }
+
+ private:
   template <typename T>
   void Print(const T* ptr, size_t num_elements) {
     CHECK_OK_STATUS(GetStatus(cudaDeviceSynchronize()));
     for (size_t i = 0; i < num_elements; ++i) {
-      *oss << " " << ptr[i];
+      *oss_ << " " << ptr[i];
     }
   }
 
-  std::ostringstream* oss;
-  size_t size_in_bytes;
+  std::ostringstream* oss_;
+  size_t size_in_bytes_;
 };
 }  // namespace
 
@@ -771,7 +789,7 @@ string GetTensorDebugString(const TensorDescriptor& desc,
   }
   if (print_values) {
     oss << "\nvalues:";
-    visit(PrintVisitor{&oss, GetTensorSizeInBytes(desc)},
+    visit(PrintVisitor(&oss, GetTensorSizeInBytes(desc)),
           GetPointerVariant(data, desc_data.data_type));
   }
   return oss.str();
@@ -837,32 +855,6 @@ Status RunConvolution(const CudnnHandle& handle, const ConvolutionAlgo& algo,
                   workspace.get(),
                   workspace_size};
   return GetStatus(visit(visitor, algo));
-}
-
-Status RunConvolution(const CudnnHandle& handle, const ConvolutionAlgo& algo,
-                      double alpha, double beta,
-                      const TensorDescriptor& input_desc,
-                      const DeviceMemory& input_data,
-                      const FilterDescriptor& filter_desc,
-                      const DeviceMemory& filter_data,
-                      const ConvolutionDescriptor& convolution_desc,
-                      const TensorDescriptor& output_desc,
-                      const DeviceMemory& output_data) {
-  ASSIGN_OR_RETURN_STATUS(
-      auto workspace_size,
-      GetWorkspaceSize(handle, input_desc, filter_desc, convolution_desc,
-                       output_desc, algo));
-
-  ASSIGN_OR_RETURN_STATUS(auto workspace, AllocateDeviceMemory(workspace_size));
-
-  RETURN_IF_ERROR_STATUS(
-      RunConvolution(handle, algo, alpha, beta, input_desc, input_data,
-                     filter_desc, filter_data, convolution_desc, output_desc,
-                     output_data, workspace, workspace_size));
-
-  // Detect and handle CUDA errors to avoid hitting the CHECK_OK_STATUS when
-  // deallocating the workspace.
-  return GetStatus(cudaDeviceSynchronize());
 }
 
 StatusOr<Convolution> CreateConvolution(const proto::ConvolutionConfig& proto,

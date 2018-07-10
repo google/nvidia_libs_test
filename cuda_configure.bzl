@@ -1,28 +1,28 @@
 """Build rule generator for locally installed CUDA toolkit and cuDNN SDK."""
 
 def _get_env_var(repository_ctx, name, default):
-  if name in repository_ctx.os.environ:
-    return repository_ctx.os.environ[name]
-  return default
+    if name in repository_ctx.os.environ:
+        return repository_ctx.os.environ[name]
+    return default
 
 def _impl(repository_ctx):
-  cuda_path = _get_env_var(repository_ctx, "CUDA_PATH", "/usr/local/cuda")
-  cudnn_path = _get_env_var(repository_ctx, "CUDNN_PATH", cuda_path)
+    cuda_path = _get_env_var(repository_ctx, "CUDA_PATH", "/usr/local/cuda")
+    cudnn_path = _get_env_var(repository_ctx, "CUDNN_PATH", cuda_path)
 
-  print("Using CUDA from %s\n" % cuda_path)
-  print("Using cuDNN from %s\n" % cudnn_path)
+    print("Using CUDA from %s\n" % cuda_path)
+    print("Using cuDNN from %s\n" % cudnn_path)
 
-  repository_ctx.symlink(cuda_path, "cuda")
-  repository_ctx.symlink(cudnn_path, "cudnn")
+    repository_ctx.symlink(cuda_path, "cuda")
+    repository_ctx.symlink(cudnn_path, "cudnn")
 
-  repository_ctx.file("nvcc.sh", """
+    repository_ctx.file("nvcc.sh", """
 #! /bin/bash
 repo_path=%s
 compiler=${CC:+"--compiler-bindir=$CC"}
 $repo_path/cuda/bin/nvcc $compiler --compiler-options=-fPIC --include-path=$repo_path $*
 """ % repository_ctx.path("."))
 
-  repository_ctx.file("BUILD", """
+    repository_ctx.file("BUILD", """
 package(default_visibility = ["//visibility:public"])
 
 sh_binary(
@@ -97,6 +97,6 @@ cc_library(
 """)
 
 cuda_configure = repository_rule(
-    implementation=_impl,
+    implementation = _impl,
     environ = ["CUDA_PATH", "CUDNN_PATH"],
 )
