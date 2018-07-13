@@ -448,3 +448,44 @@ convolution_test {
     all_algos: CONVOLUTION_BWD_DATA
   }
 }
+
+# Crashes with CUDA 9.0 and cuDNN 7.1.4 on TITAN V. The layout combination is
+# indeed documentated as not supported, but cuDNN should return an error
+# instead.
+convolution_test {
+  reference {
+    input {
+      dimension: 128
+      dimension: 1024
+      dimension: 14
+      dimension: 14
+      data_type: DATA_HALF
+      format: TENSOR_NCHW
+    }
+    filter {
+      dimension: 2048
+      dimension: 1024
+      dimension: 1
+      dimension: 1
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    output {
+      dimension: 128
+      dimension: 2048
+      dimension: 7
+      dimension: 7
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    convolution {
+      filter_stride: 2
+      filter_stride: 2
+      compute_mode: DATA_FLOAT
+      math_type: TENSOR_OP_MATH
+      mode: CROSS_CORRELATION
+    }
+    bwd_data_algo: CONVOLUTION_BWD_DATA_ALGO_1
+    label: "NCHW_NHWC_NHWC_Crash"
+  }
+}
