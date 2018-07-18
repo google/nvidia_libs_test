@@ -398,6 +398,8 @@ convolution_test {
 # This test fails because TENSOR_OP_MATH + CONVOLUTION_BWD_DATA_ALGO_1
 # incorrectly assumes a zero-initialized workspace. The bug reproduces on
 # TITAN V with CUDA 9.0 and cuDNN 7.1.4.
+#
+# See nvbugs/2254619.
 convolution_test {
   reference {
     input {
@@ -452,6 +454,8 @@ convolution_test {
 # Crashes with CUDA 9.0 and cuDNN 7.1.4 on TITAN V. The layout combination is
 # indeed documentated as not supported, but cuDNN should return an error
 # instead.
+#
+# See nvbugs/2260917.
 convolution_test {
   reference {
     input {
@@ -487,5 +491,51 @@ convolution_test {
     }
     bwd_data_algo: CONVOLUTION_BWD_DATA_ALGO_1
     label: "NCHW_NHWC_NHWC_Crash"
+  }
+}
+
+# TITAN V + cuDNN 7.1.4 + CUDA 9.0
+#
+# The convolution call should return an error code, but instead it sliently
+# went wild and cause out-of-bound memory access, resulting illegal access
+# code in succeeding cuDNN calls. cuda-memcheck seems to be needed to stably
+# reproduce the illegal access crash.
+#
+# TODO: add a nvbugs link.
+convolution_test {
+  reference {
+    input {
+      dimension: 128
+      dimension: 64
+      dimension: 56
+      dimension: 56
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    filter {
+      dimension: 256
+      dimension: 64
+      dimension: 1
+      dimension: 1
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    output {
+      dimension: 128
+      dimension: 256
+      dimension: 56
+      dimension: 56
+      data_type: DATA_HALF
+      format: TENSOR_NCHW
+    }
+    convolution {
+      filter_stride: 1
+      filter_stride: 1
+      compute_mode: DATA_FLOAT
+      math_type: TENSOR_OP_MATH
+      mode: CROSS_CORRELATION
+    }
+    fwd_algo: CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM
+    label: "NHWC_NHWC_NCHW_ILLEGAL_ACCESS"
   }
 }
