@@ -490,7 +490,8 @@ convolution_test {
       mode: CROSS_CORRELATION
     }
     bwd_data_algo: CONVOLUTION_BWD_DATA_ALGO_1
-    label: "NCHW_NHWC_NHWC_Crash"
+    # Disabled to prevent crashing on normal runs.
+    label: "DISABLED_NCHW_NHWC_NHWC_Crash"
   }
 }
 
@@ -536,6 +537,7 @@ convolution_test {
       mode: CROSS_CORRELATION
     }
     fwd_algo: CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM
-    label: "NHWC_NHWC_NCHW_ILLEGAL_ACCESS"
+    # Disabled to prevent crashing on normal runs.
+    label: "DISABLED_NHWC_NHWC_NCHW_ILLEGAL_ACCESS"
   }
 }
