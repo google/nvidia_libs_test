@@ -215,15 +215,16 @@ cudnnDataType_t GetTensorDataType(const TensorDescriptor& tensor) {
 
 namespace {
 StatusOr<DeviceMemory> CreateDeviceDataHelper(cudnnDataType_t data_type,
-                                              size_t num_elements,
+                                              size_t num_elements, double lower,
+                                              double upper,
                                               const RandomGenerator& rand_gen) {
   switch (data_type) {
     case CUDNN_DATA_FLOAT:
-      return CreateDeviceData<float>(num_elements, rand_gen);
+      return CreateDeviceData<float>(num_elements, lower, upper, rand_gen);
     case CUDNN_DATA_DOUBLE:
-      return CreateDeviceData<double>(num_elements, rand_gen);
+      return CreateDeviceData<double>(num_elements, lower, upper, rand_gen);
     case CUDNN_DATA_HALF:
-      return CreateDeviceData<__half>(num_elements, rand_gen);
+      return CreateDeviceData<__half>(num_elements, lower, upper, rand_gen);
     default:
       LOG(FATAL) << "Not yet supported";
   }
@@ -231,9 +232,11 @@ StatusOr<DeviceMemory> CreateDeviceDataHelper(cudnnDataType_t data_type,
 }  // namespace
 
 StatusOr<DeviceMemory> CreateTensorData(const TensorDescriptor& tensor,
+                                        double lower, double upper,
                                         const RandomGenerator& rand_gen) {
   return CreateDeviceDataHelper(GetTensorDataType(tensor),
-                                GetTensorNumElements(tensor), rand_gen);
+                                GetTensorNumElements(tensor), lower, upper,
+                                rand_gen);
 }
 
 namespace {
@@ -301,9 +304,11 @@ cudnnDataType_t GetFilterDataType(const FilterDescriptor& filter) {
 }
 
 StatusOr<DeviceMemory> CreateFilterData(const FilterDescriptor& filter,
+                                        double lower, double upper,
                                         const RandomGenerator& rand_gen) {
   return CreateDeviceDataHelper(GetFilterDataType(filter),
-                                GetFilterNumElements(filter), rand_gen);
+                                GetFilterNumElements(filter), lower, upper,
+                                rand_gen);
 }
 
 namespace {
@@ -858,6 +863,7 @@ Status RunConvolution(const CudnnHandle& handle, const ConvolutionAlgo& algo,
 }
 
 StatusOr<Convolution> CreateConvolution(const proto::ConvolutionConfig& proto,
+                                        double data_lower, double data_upper,
                                         const RandomGenerator& rand_gen) {
   if (CUDNN_MAJOR < 7 && proto.convolution().group_count() > 1) {
     return ErrorStatus("Grouped convolution requires cuDNN 7");
@@ -871,14 +877,17 @@ StatusOr<Convolution> CreateConvolution(const proto::ConvolutionConfig& proto,
       auto output_desc,
       CreateOutputDescriptor(proto, input_desc, filter_desc, conv_desc));
 
-  ASSIGN_OR_RETURN_STATUS(auto input_data,
-                          CreateTensorData(input_desc, rand_gen));
+  ASSIGN_OR_RETURN_STATUS(
+      auto input_data,
+      CreateTensorData(input_desc, data_lower, data_upper, rand_gen));
 
-  ASSIGN_OR_RETURN_STATUS(auto filter_data,
-                          CreateFilterData(filter_desc, rand_gen));
+  ASSIGN_OR_RETURN_STATUS(
+      auto filter_data,
+      CreateFilterData(filter_desc, data_lower, data_upper, rand_gen));
 
-  ASSIGN_OR_RETURN_STATUS(auto output_data,
-                          CreateTensorData(output_desc, rand_gen));
+  ASSIGN_OR_RETURN_STATUS(
+      auto output_data,
+      CreateTensorData(output_desc, data_lower, data_upper, rand_gen));
 
   return Convolution{std::move(input_desc),  std::move(filter_desc),
                      std::move(output_desc), std::move(conv_desc),

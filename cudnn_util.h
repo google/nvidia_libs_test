@@ -84,6 +84,7 @@ cudnnDataType_t GetTensorDataType(const TensorDescriptor& tensor);
 
 // Allocates device memory for tensor and initializes it with random values.
 StatusOr<DeviceMemory> CreateTensorData(const TensorDescriptor& tensor,
+                                        double lower, double upper,
                                         const RandomGenerator& rand_gen);
 
 // Blends the data from src tensor with dst tensor.
@@ -212,6 +213,7 @@ struct Convolution {
 // Convenience function to create everything needed to run a convolution
 // specified by proto.
 StatusOr<Convolution> CreateConvolution(const proto::ConvolutionConfig& proto,
+                                        double data_lower, double data_upper,
                                         const RandomGenerator& rand_gen);
 
 }  // namespace nvidia_libs_test

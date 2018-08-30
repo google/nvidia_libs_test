@@ -73,9 +73,12 @@ class DeviceMemory {
 namespace detail {
 size_t GetCurandStateSize();
 void InitializeCurandState(void* state, size_t seed);
-void InitializeDeviceData(float* ptr, size_t num_elements, void* state);
-void InitializeDeviceData(double* ptr, size_t num_elements, void* state);
-void InitializeDeviceData(__half* ptr, size_t num_elements, void* state);
+void InitializeDeviceData(float* ptr, size_t num_elements, double lower,
+                          double upper, void* state);
+void InitializeDeviceData(double* ptr, size_t num_elements, double lower,
+                          double upper, void* state);
+void InitializeDeviceData(__half* ptr, size_t num_elements, double lower,
+                          double upper, void* state);
 void FillDeviceWithGarbageImpl(void* ptr, size_t num_bytes);
 }  // namespace detail
 
@@ -86,8 +89,9 @@ class RandomGenerator {
 
  private:
   template <typename T>
-  friend StatusOr<DeviceMemory> CreateDeviceData(size_t,
-                                                 const RandomGenerator&);
+  friend StatusOr<DeviceMemory> CreateDeviceData(
+      size_t num_elements, double lower, double upper,
+      const RandomGenerator& rand_gen);
 
   DeviceMemory state_;
 };
@@ -115,12 +119,15 @@ Status CopyDeviceMemory(const DeviceMemory& dst, const DeviceMemory& src,
 
 // Creates array of num_elements of type T containing random data.
 template <typename T>
-StatusOr<DeviceMemory> CreateDeviceData(size_t num_elements,
+StatusOr<DeviceMemory> CreateDeviceData(size_t num_elements, double lower,
+                                        double upper,
                                         const RandomGenerator& rand_gen) {
+  CHECK_LE(lower, upper);
   auto result = AllocateDeviceMemory(num_elements * sizeof(T));
   RETURN_IF_ERROR_STATUS(result.status());
   T* ptr = static_cast<T*>(result.ValueOrDie().get());
-  detail::InitializeDeviceData(ptr, num_elements, rand_gen.state_.get());
+  detail::InitializeDeviceData(ptr, num_elements, lower, upper,
+                               rand_gen.state_.get());
   return result;
 }
 

@@ -502,7 +502,7 @@ convolution_test {
 # code in succeeding cuDNN calls. cuda-memcheck seems to be needed to stably
 # reproduce the illegal access crash.
 #
-# TODO: add a nvbugs link.
+# See nvbugs/2270290.
 convolution_test {
   reference {
     input {
@@ -540,4 +540,70 @@ convolution_test {
     # Disabled to prevent crashing on normal runs.
     label: "DISABLED_NHWC_NHWC_NCHW_ILLEGAL_ACCESS"
   }
+}
+
+# TITAN V + cuDNN 7.2 + CUDA 9.0
+#
+# Since the input buffer is specified with all 0.1s, the correct result
+# is 0.1 * 0.1 * 128 * 56 * 56 = 4014.08. We pick broadcasted 0.1 as the input
+# data for easy reasoning and not overflowing during the summation.
+#
+# We don't want to overflow the result, only because in our tests infs don't
+# compare equal infs. It's possible that we can still reproduce the bug by
+# having a inf - nan mismatch, if we consider all infs equal.
+#
+# For CONVOLUTION_BWD_FILTER_ALGO_1 with TENSOR_OP_MATH, the results are all
+# NaNs. Other algorithms produce close enough answers.
+#
+# TODO: add a nvbugs/ link.
+convolution_test {
+  reference {
+    input {
+      dimension: 128
+      dimension: 128
+      dimension: 56
+      dimension: 56
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    filter {
+      dimension: 256
+      dimension: 128
+      dimension: 3
+      dimension: 3
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    output {
+      dimension: 128
+      dimension: 256
+      dimension: 56
+      dimension: 56
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    convolution {
+      filter_stride: 1
+      filter_stride: 1
+      pad: 1
+      pad: 1
+      compute_mode: DATA_FLOAT
+      math_type: DEFAULT_MATH
+      mode: CROSS_CORRELATION
+    }
+    bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_0
+    label: "CONVOLUTION_BWD_FILTER_128x128x56x56_256x128x3x3_Incorrect"
+  }
+  test {
+    all_algos: CONVOLUTION_BWD_FILTER
+  }
+  test {
+    convolution {
+      math_type: TENSOR_OP_MATH
+    }
+    all_algos: CONVOLUTION_BWD_FILTER
+  }
+  # We need smaller values so that the end results are not overflowed.
+  values_lower_bound: 0.1
+  values_upper_bound: 0.1
 }

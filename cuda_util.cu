@@ -70,31 +70,37 @@ __global__ void InitializeCurandStateKernel(curandState* states, size_t seed) {
   curand_init(seed, thread_idx, /*offset=*/0, states + thread_idx);
 }
 
-__device__ void GenerateUniform(__half* dst, curandState* state) {
-  *dst = __float2half(curand_uniform(state));
+__device__ void GenerateUniform(__half* dst, float scale, float bias,
+                                curandState* state) {
+  *dst = __float2half(curand_uniform(state) * scale + bias);
 }
-__device__ void GenerateUniform(float* dst, curandState* state) {
-  *dst = curand_uniform(state);
+__device__ void GenerateUniform(float* dst, float scale, float bias,
+                                curandState* state) {
+  *dst = curand_uniform(state) * scale + bias;
 }
-__device__ void GenerateUniform(double* dst, curandState* state) {
-  *dst = curand_uniform_double(state);
+__device__ void GenerateUniform(double* dst, double scale, double bias,
+                                curandState* state) {
+  *dst = curand_uniform_double(state) * scale + bias;
 }
 
 template <typename T>
 __global__ void InitializeDeviceDataKernel(T* ptr, size_t num_elements,
+                                           double scale, double bias,
                                            curandState* states) {
   size_t thread_idx = threadIdx.x + blockIdx.x * blockDim.x;
   curandState state = states[thread_idx];
   for (size_t i = thread_idx; i < num_elements; i += gridDim.x * blockDim.x) {
-    GenerateUniform(ptr + i, &state);
+    GenerateUniform(ptr + i, scale, bias, &state);
   }
   states[thread_idx] = state;
 }
 
 template <typename T>
-void InitializeDeviceDataImpl(T* ptr, size_t num_elements, void* state) {
+void InitializeDeviceDataImpl(T* ptr, size_t num_elements, double lower,
+                              double upper, void* state) {
   InitializeDeviceDataKernel<<<kGridDim, kBlockDim>>>(
-      ptr, num_elements, static_cast<curandState*>(state));
+      ptr, num_elements, upper - lower, lower,
+      static_cast<curandState*>(state));
 }
 
 __global__ void FillDeviceWithGarbageKernel(void* ptr, size_t num_bytes) {
@@ -141,16 +147,19 @@ void InitializeCurandState(void* state, size_t seed) {
       static_cast<curandState*>(state), seed);
 }
 
-void InitializeDeviceData(float* ptr, size_t num_elements, void* state) {
-  InitializeDeviceDataImpl(ptr, num_elements, state);
+void InitializeDeviceData(float* ptr, size_t num_elements, double lower,
+                          double upper, void* state) {
+  InitializeDeviceDataImpl(ptr, num_elements, lower, upper, state);
 }
 
-void InitializeDeviceData(double* ptr, size_t num_elements, void* state) {
-  InitializeDeviceDataImpl(ptr, num_elements, state);
+void InitializeDeviceData(double* ptr, size_t num_elements, double lower,
+                          double upper, void* state) {
+  InitializeDeviceDataImpl(ptr, num_elements, lower, upper, state);
 }
 
-void InitializeDeviceData(__half* ptr, size_t num_elements, void* state) {
-  InitializeDeviceDataImpl(ptr, num_elements, state);
+void InitializeDeviceData(__half* ptr, size_t num_elements, double lower,
+                          double upper, void* state) {
+  InitializeDeviceDataImpl(ptr, num_elements, lower, upper, state);
 }
 
 void FillDeviceWithGarbageImpl(void* ptr, size_t num_bytes) {

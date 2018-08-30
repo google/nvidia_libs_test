@@ -191,6 +191,14 @@ message ConvolutionConfig {
 message ConvolutionTest {
   ConvolutionConfig reference = 1;
   repeated ConvolutionConfig test = 2;
+
+  // The two numbers describe an interval [values_lower_bound,
+  // values_upper_bound] such that, all randomly generated device data are
+  // scaled to that range, uniformly.
+  double values_lower_bound = 3;
+  oneof values_bound_oneof {
+    double values_upper_bound = 4;
+  }
 }
 
 message Tests {

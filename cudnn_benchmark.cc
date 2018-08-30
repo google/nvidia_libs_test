@@ -84,7 +84,7 @@ Status ConvolutionBenchmark(benchmark::State& state,
   RandomGenerator rand_gen(/*seed=*/0);
 
   ASSIGN_OR_RETURN_STATUS(Convolution benchmark,
-                          CreateConvolution(proto, rand_gen));
+                          CreateConvolution(proto, 0., 1., rand_gen));
 
   ASSIGN_OR_RETURN_STATUS(size_t workspace_limit, GetWorkspaceLimit(proto));
 
@@ -160,10 +160,10 @@ Status TransformationBenchmark(benchmark::State& state,
   TensorDescriptor second_desc = CreateTensorDescriptor(second);
 
   ASSIGN_OR_RETURN_STATUS(auto first_data,
-                          CreateTensorData(first_desc, rand_gen));
+                          CreateTensorData(first_desc, 0., 1., rand_gen));
 
   ASSIGN_OR_RETURN_STATUS(auto second_data,
-                          CreateTensorData(second_desc, rand_gen));
+                          CreateTensorData(second_desc, 0., 1., rand_gen));
 
   auto kernel_timer = GetTimer();
   kernel_timer->StartTiming();

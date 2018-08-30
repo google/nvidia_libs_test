@@ -282,9 +282,15 @@ TEST_P(ConvolutionTest, CompareResults) {
 
   // Run reference convolution first, then compare others to the reference
   // result.
+  double data_lower = GetParam().values_lower_bound(), data_upper = 1.;
+  if (GetParam().values_bound_oneof_case() ==
+      proto::ConvolutionTest::kValuesUpperBound) {
+    data_upper = GetParam().values_upper_bound();
+  }
 
   auto ref_proto = GetParam().reference();
-  ASSERT_OK_AND_ASSIGN(auto reference, CreateConvolution(ref_proto, rand_gen));
+  ASSERT_OK_AND_ASSIGN(auto reference, CreateConvolution(ref_proto, data_lower,
+                                                         data_upper, rand_gen));
 
   ASSERT_NE(ref_proto.algo_oneof_case(), proto::ConvolutionConfig::kAllAlgos);
   auto ref_algo = GetAlgorithms(ref_proto, handle, reference, 0).front();
@@ -298,7 +304,9 @@ TEST_P(ConvolutionTest, CompareResults) {
 
   for (auto proto : GetParam().test()) {
     proto = GetMergedConvolution(ref_proto, proto);
-    ASSERT_OK_AND_ASSIGN(Convolution test, CreateConvolution(proto, rand_gen));
+    ASSERT_OK_AND_ASSIGN(
+        Convolution test,
+        CreateConvolution(proto, data_lower, data_upper, rand_gen));
 
     // We now have input, filter, and output buffers for the reference and the
     // test. A convolution has two read-only argument buffers and writes the
