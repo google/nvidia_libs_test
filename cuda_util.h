@@ -79,7 +79,6 @@ void InitializeDeviceData(double* ptr, size_t num_elements, double lower,
                           double upper, void* state);
 void InitializeDeviceData(__half* ptr, size_t num_elements, double lower,
                           double upper, void* state);
-void FillDeviceWithGarbageImpl(void* ptr, size_t num_bytes);
 }  // namespace detail
 
 // Random number generator for device data.
@@ -106,9 +105,7 @@ void* GetDevicePointer(const HostMemory& host_ptr);
 StatusOr<DeviceMemory> AllocateDeviceMemory(size_t size);
 
 // Fill the device memory with garbage data.
-inline void FillDeviceWithGarbage(const DeviceMemory& mem) {
-  detail::FillDeviceWithGarbageImpl(mem.get(), mem.size());
-}
+void FillWithNaNs(const DeviceMemory& mem);
 
 // Returns amount of bytes allocated through AllocateDeviceMemory.
 size_t GetAllocatedDeviceMemoryBytes();

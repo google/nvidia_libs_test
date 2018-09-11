@@ -555,7 +555,7 @@ convolution_test {
 # For CONVOLUTION_BWD_FILTER_ALGO_1 with TENSOR_OP_MATH, the results are all
 # NaNs. Other algorithms produce close enough answers.
 #
-# TODO: add a nvbugs/ link.
+# See nvbugs/2354662.
 convolution_test {
   reference {
     input {
@@ -606,4 +606,135 @@ convolution_test {
   # We need smaller values so that the end results are not overflowed.
   values_lower_bound: 0.1
   values_upper_bound: 0.1
+}
+
+# We've seen precision loss between different algorithms on Volta, CUDA 9.0 and
+# CUDNN 7.2/7.1.4. One possible output:
+# Value of: IsOk(TensorDataEqual(ref_result_data, *result_data, *result_desc, tolerance))
+#   Actual: false (14 elements differ more than 0.1. Largest differences:
+# [1898]: 1.1582 vs 0.587891, error = 0.264253
+# [2575]: -0.547852 vs -0.976562, error = 0.216897
+# [3512]: -0.507324 vs -0.19812, error = 0.205134
+# [2550]: 0.604004 vs 1.00781, error = 0.201119
+# [408]: 0.872559 vs 0.54834, error = 0.173142
+# [360]: 0.806641 vs 0.49585, error = 0.172027
+# [1075]: -0.790527 vs -1.15234, error = 0.168103
+# [2181]: -2.16797 vs -1.66211, error = 0.159679)
+# Expected: true
+# format: TENSOR_NHWC
+# data_type: DATA_HALF
+# compute_mode: DATA_FLOAT
+# math_type: TENSOR_OP_MATH
+# algo: CONVOLUTION_BWD_FILTER_ALGO_0
+#
+# Note that this isn't necessarily a bug. Re-associating floating point
+# additions on a variety of exponents may result in quite a difference.
+#
+# The difference is large between `ALGO_0 + default math` vs
+# `ALGO_0 + tensor core math`. Other algorithm + mode combinations seem fine.
+convolution_test {
+  reference {
+    input {
+      dimension: 128
+      dimension: 64
+      dimension: 56
+      dimension: 56
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    filter {
+      dimension: 64
+      dimension: 64
+      dimension: 1
+      dimension: 1
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    output {
+      dimension: 128
+      dimension: 64
+      dimension: 56
+      dimension: 56
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    convolution {
+      filter_stride: 1
+      filter_stride: 1
+      compute_mode: DATA_FLOAT
+      math_type: DEFAULT_MATH
+      mode: CROSS_CORRELATION
+    }
+    bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_0
+    label: "NHWC_BWD_FILTER_PrecisionLoss"
+  }
+  test {
+    all_algos: CONVOLUTION_BWD_FILTER
+  }
+  test {
+    convolution {
+      math_type: TENSOR_OP_MATH
+    }
+    all_algos: CONVOLUTION_BWD_FILTER
+  }
+  values_lower_bound: -1.
+  values_upper_bound: 1.
+}
+
+# TITAN V + cuDNN 7.1.4/7.2 + CUDA 9.0
+#
+# This failure is very flaky. It needs to be run for many times (e.g. using
+# --gtest_repeat=100) to produce a mismatch.
+#
+# Also, the failure only appears when the result buffer (in this case, the
+# filter buffer) is initialized with NaNs.
+convolution_test {
+  reference {
+    input {
+      dimension: 256
+      dimension: 3
+      dimension: 224
+      dimension: 224
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    filter {
+      dimension: 64
+      dimension: 3
+      dimension: 7
+      dimension: 7
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    output {
+      dimension: 256
+      dimension: 64
+      dimension: 112
+      dimension: 112
+      data_type: DATA_HALF
+      format: TENSOR_NHWC
+    }
+    convolution {
+      filter_stride: 2
+      filter_stride: 2
+      pad: 3
+      pad: 3
+      compute_mode: DATA_FLOAT
+      math_type: DEFAULT_MATH
+      mode: CROSS_CORRELATION
+    }
+    bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_0
+    label: "FlakyMismatch"
+  }
+  test {
+    all_algos: CONVOLUTION_BWD_FILTER
+  }
+  test {
+    convolution {
+      math_type: TENSOR_OP_MATH
+    }
+    all_algos: CONVOLUTION_BWD_FILTER
+  }
+  values_lower_bound: 0.001
+  values_upper_bound: 0.001
 }

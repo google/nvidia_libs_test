@@ -103,13 +103,6 @@ void InitializeDeviceDataImpl(T* ptr, size_t num_elements, double lower,
       static_cast<curandState*>(state));
 }
 
-__global__ void FillDeviceWithGarbageKernel(void* ptr, size_t num_bytes) {
-  size_t thread_idx = threadIdx.x + blockIdx.x * blockDim.x;
-  for (size_t i = thread_idx; i < num_bytes; i += gridDim.x * blockDim.x) {
-    *((unsigned char*)ptr + i) = thread_idx % 256;
-  }
-}
-
 }  // namespace
 
 void ConvertDeviceData(double scale, double* dst, const float* src,
@@ -160,10 +153,6 @@ void InitializeDeviceData(double* ptr, size_t num_elements, double lower,
 void InitializeDeviceData(__half* ptr, size_t num_elements, double lower,
                           double upper, void* state) {
   InitializeDeviceDataImpl(ptr, num_elements, lower, upper, state);
-}
-
-void FillDeviceWithGarbageImpl(void* ptr, size_t num_bytes) {
-  FillDeviceWithGarbageKernel<<<kGridDim, kBlockDim>>>(ptr, num_bytes);
 }
 }  // namespace detail
 

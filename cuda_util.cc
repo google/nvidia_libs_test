@@ -123,6 +123,10 @@ StatusOr<DeviceMemory> AllocateDeviceMemory(size_t size) {
   return std::move(result);
 }
 
+void FillWithNaNs(const DeviceMemory& mem) {
+  CHECK_OK_STATUS(GetStatus(cudaMemset(mem.get(), 0xff, mem.size())));
+}
+
 size_t GetAllocatedDeviceMemoryBytes() { return allocated_device_memory_bytes; }
 
 Status CopyDeviceMemory(const DeviceMemory& dst, const DeviceMemory& src,

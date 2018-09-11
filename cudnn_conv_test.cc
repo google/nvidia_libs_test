@@ -204,7 +204,7 @@ Status RunConvolution(double alpha, double beta, const CudnnHandle& handle,
                        convolution.conv_desc, convolution.output_desc, algo));
 
   ASSIGN_OR_RETURN_STATUS(auto workspace, AllocateDeviceMemory(workspace_size));
-  FillDeviceWithGarbage(workspace);
+  FillWithNaNs(workspace);
 
   RETURN_IF_ERROR_STATUS(RunConvolution(
       handle, algo, alpha, beta, convolution.input_desc, convolution.input_data,
@@ -324,6 +324,9 @@ TEST_P(ConvolutionTest, CompareResults) {
     // point. Tensors aren't necessarily packed and we use the random value of
     // buffer elements not referenced by the tensor to detect out-of-bounds
     // access by cuDNN.
+    //
+    // If beta is zero, which means the result buffer values shouldn't be read,
+    // we populate result buffer with NaNs before sending it to the convolution.
 
     auto direction = [&] {
       switch (proto.algo_oneof_case()) {
@@ -376,10 +379,22 @@ TEST_P(ConvolutionTest, CompareResults) {
     }
     size_t result_size = GetTensorSizeInBytes(*result_desc);
 
-    // Make a copy of the test result buffer so that we can reset it to the same
-    // random values before running each algorithm.
-    ASSERT_OK_AND_ASSIGN(auto init_data, AllocateDeviceMemory(result_size));
-    ASSERT_TRUE(IsOk(CopyDeviceMemory(init_data, *result_data, result_size)));
+    DeviceMemory init_data(nullptr);
+    if (beta > 0) {
+      // Make a copy of the test result buffer so that we can reset it to the
+      // same random values before running each algorithm.
+      ASSERT_OK_AND_ASSIGN(init_data, AllocateDeviceMemory(result_size));
+      ASSERT_TRUE(IsOk(CopyDeviceMemory(init_data, *result_data, result_size)));
+    }
+    // Reset the test result buffer and run the convolution.
+    const auto restore_result_buffer = [&] {
+      if (beta > 0) {
+        ASSERT_TRUE(
+            IsOk(CopyDeviceMemory(*result_data, init_data, result_size)));
+      } else {
+        FillWithNaNs(*result_data);
+      }
+    };
 
     // Blend the reference buffers into the corresponding test buffers. This
     // may involve converting the data type (e.g. from double to float) and
@@ -410,8 +425,7 @@ TEST_P(ConvolutionTest, CompareResults) {
     double tolerance_scale = GetToleranceScale(proto);
     for (const auto& algo :
          GetAlgorithms(proto, handle, test, workspace_limit)) {
-      // Reset the test result buffer and run the convolution.
-      ASSERT_TRUE(IsOk(CopyDeviceMemory(*result_data, init_data, result_size)));
+      restore_result_buffer();
       auto get_message = [&] {
         std::ostringstream oss;
         oss << "format: " << proto::TensorFormat_Name(proto.input().format())
