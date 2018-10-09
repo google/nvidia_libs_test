@@ -20,13 +20,12 @@
 #include <cstddef>
 #include <memory>
 
-// host_defines.h with __align__ macro has to be included before cuda_fp16.h.
-#include "cuda/include/host_defines.h"
+// cuda_runtime.h with __align__ macro has to be included before cuda_fp16.h.
+#include "cuda/include/cuda_runtime.h"
 
 #include "cuda/extras/CUPTI/include/cupti_result.h"
 #include "cuda/include/cuda.h"
 #include "cuda/include/cuda_fp16.h"
-#include "cuda/include/driver_types.h"
 #include "status.h"
 
 // Function overloads converting CUDA API status codes to Status so that CUDA

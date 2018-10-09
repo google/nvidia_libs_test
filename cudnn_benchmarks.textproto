@@ -1,27 +1,108 @@
 # This file contains custom benchmark configs, in addition to the ones generated
 # in the source code.
+
+# CUDA 9.x + Volta performance regressions in cuDNN 7.3.0 -> 7.3.1.
+# TODO: add an nvbugs/ link.
 convolution_benchmark {
-  label: "example"
+  label: "NHWC_128x32x32x128x256"
   input {
-    dimension: 32
-    dimension: 1248
-    dimension: 5
-    dimension: 5
-    data_type: DATA_FLOAT
-    format: TENSOR_NCHW
+    dimension: [128, 128, 32, 32]
+    data_type: DATA_HALF format: TENSOR_NHWC
   }
   filter {
-    dimension: 128
-    dimension: 1248
-    dimension: 1
-    dimension: 1
-    data_type: DATA_FLOAT
-    format: TENSOR_NCHW
+    dimension: [256, 128, 5, 1]
+    data_type: DATA_HALF
+    format: TENSOR_NHWC
+  }
+  output {
+    dimension: [128, 256, 32, 32]
+    data_type: DATA_HALF
+    format: TENSOR_NHWC
   }
   convolution {
-    pad: 0
-    pad: 0
+    pad: [2, 0]
     compute_mode: DATA_FLOAT
+    math_type: TENSOR_OP_MATH
+    mode: CROSS_CORRELATION
   }
-  find_algo: CONVOLUTION_FWD
+  bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_1
 }
+
+convolution_benchmark {
+  label: "NHWC_128x32x32x128x1024"
+  input {
+    dimension: [128, 128, 32, 32]
+    data_type: DATA_HALF
+    format: TENSOR_NHWC
+  }
+  filter {
+    dimension: [1024, 128, 1, 1]
+    data_type: DATA_HALF
+    format: TENSOR_NHWC
+  }
+  output {
+    dimension: [128, 1024, 32, 32]
+    data_type: DATA_HALF
+    format: TENSOR_NHWC
+  }
+  convolution {
+    pad: [0, 0]
+    compute_mode: DATA_FLOAT
+    math_type: TENSOR_OP_MATH
+    mode: CROSS_CORRELATION
+  }
+  bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_0
+}
+
+convolution_benchmark {
+  label: "NHWC_128x32x32x1024x1024"
+  input {
+    dimension: [128, 1024, 32, 32]
+    data_type: DATA_HALF
+    format: TENSOR_NHWC
+  }
+  filter {
+    dimension: [1024, 1024, 1, 1]
+    data_type: DATA_HALF
+    format: TENSOR_NHWC
+  }
+  output {
+    dimension: [128, 1024, 32, 32]
+    data_type: DATA_HALF
+    format: TENSOR_NHWC
+  }
+  convolution {
+    pad: [0, 0]
+    compute_mode: DATA_FLOAT
+    math_type: TENSOR_OP_MATH
+    mode: CROSS_CORRELATION
+  }
+  bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_0
+}
+
+convolution_benchmark {
+  label: "NHWC_128x32x32x1024x768"
+  input {
+    dimension: [128, 1024, 32, 32]
+    data_type: DATA_HALF
+    format: TENSOR_NHWC
+  }
+  filter {
+    dimension: [768, 1024, 1, 1]
+    data_type: DATA_HALF
+    format: TENSOR_NHWC
+  }
+  output {
+    dimension: [128, 768, 32, 32]
+    data_type: DATA_HALF
+    format: TENSOR_NHWC
+  }
+  convolution {
+    pad: [0, 0]
+    compute_mode: DATA_FLOAT
+    math_type: TENSOR_OP_MATH
+    mode: CROSS_CORRELATION
+  }
+  bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_0
+}
+# end of 7.3.0 -> 7.3.1 regressions
