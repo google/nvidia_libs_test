@@ -73,7 +73,9 @@ DeviceMemory::DeviceMemory(DeviceMemory&& other) noexcept
 DeviceMemory& DeviceMemory::operator=(DeviceMemory&& other) {
   if (this != &other) {
     CHECK_EQ(ptr_ == nullptr || ptr_ != other.ptr_, true);
-    CHECK_OK_STATUS(GetStatus(cudaFree(ptr_)));
+    if(ptr_) {
+	CHECK_OK_STATUS(GetStatus(cudaFree(ptr_)));
+    }
     ptr_ = other.ptr_;
     size_ = other.size_;
     other.ptr_ = nullptr;
@@ -89,7 +91,9 @@ std::atomic<std::size_t> allocated_device_memory_bytes{0};
 DeviceMemory::~DeviceMemory() {
   CHECK_GE(allocated_device_memory_bytes, size_);
   allocated_device_memory_bytes -= size_;
-  CHECK_OK_STATUS(GetStatus(cudaFree(ptr_)));
+  if(ptr_) {
+      CHECK_OK_STATUS(GetStatus(cudaFree(ptr_)));
+  }
 }
 
 StatusOr<HostMemory> AllocateHostMemory(size_t size) {
