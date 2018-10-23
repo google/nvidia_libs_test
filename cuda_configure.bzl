@@ -81,6 +81,7 @@ cc_library(
     srcs = [
         "cudnn/lib64/libcudnn_static.a",
         "cuda/lib64/libcublas_static.a",
+        "cuda/lib64/libcublasLt_static.a",
         "cuda/lib64/libculibos.a",
     ],
     hdrs = ["cudnn/include/cudnn.h"],
