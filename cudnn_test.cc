@@ -119,9 +119,8 @@ TEST(ConvolutionTest, GetWorkspaceSize_Overflow) {
 }
 
 // Tests the supported range of the arrayLengthRequested parameter for
-// cudnnGetConvolutionNdDescriptor, which should be [0, CUDNN_DIM_MAX]
-// according to the documentation, but cuDNN reports CUDNN_STATUS_NOT_SUPPORTED
-// for anything larger than 6.
+// cudnnGetConvolutionNdDescriptor, which should be [0, CUDNN_DIM_MAX-2]
+// according to the corrected documentation.
 //
 // See nvbugs/2064417.
 TEST(ConvolutionTest, GetConvolutionDesciptor_ArrayLengthRequested_Range) {
@@ -132,7 +131,7 @@ TEST(ConvolutionTest, GetConvolutionDesciptor_ArrayLengthRequested_Range) {
 
   auto conv_desc = CreateConvolutionDescriptor(proto);
 
-  const int array_length = CUDNN_DIM_MAX;
+  const int array_length = CUDNN_DIM_MAX - 2;
 
   int rank;
   int pad[array_length];
