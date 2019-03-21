@@ -21,14 +21,16 @@
 #include <fstream>
 #include "google/protobuf/io/zero_copy_stream_impl.h"
 #include "google/protobuf/text_format.h"
+#include "status.h"
 
 namespace nvidia_libs_test {
 
 template <typename T>
-void LoadTextProto(string proto_path, T* proto) {
+Status LoadTextProto(string proto_path, T* proto) {
   std::ifstream ifs(proto_path);
   google::protobuf::io::IstreamInputStream iis(&ifs);
-  CHECK_EQ(google::protobuf::TextFormat::Parse(&iis, proto), true);
+  auto success = google::protobuf::TextFormat::Parse(&iis, proto);
+  return success ? OkStatus() : Status("Error parsing proto ") << proto_path;
 }
 
 }  // namespace nvidia_libs_test

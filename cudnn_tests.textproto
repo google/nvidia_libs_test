@@ -666,7 +666,7 @@ convolution_test {
       mode: CROSS_CORRELATION
     }
     bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_0
-    label: "NHWC_BWD_FILTER_PrecisionLoss"
+    label: "DISABLED_NHWC_BWD_FILTER_PrecisionLoss"
   }
   test {
     all_algos: CONVOLUTION_BWD_FILTER
@@ -737,4 +737,58 @@ convolution_test {
   }
   values_lower_bound: 0.001
   values_upper_bound: 0.001
+}
+
+# Bug reproduced on cuDNN 7.4.2 + Volta|Pascal + CUDA 9.0.
+# Example output:
+# Value of: IsOk(TensorDataEqual(ref_result_data, *result_data, *result_desc, tolerance))
+#   Actual: false (6656 elements differ more than 0.0001. Largest differences:
+# [2407]: 0.06 vs 0.03, error = 0.0283019
+# [2406]: 0.06 vs 0.03, error = 0.0283019
+# [2415]: 0.06 vs 0.03, error = 0.0283019
+# [2411]: 0.06 vs 0.03, error = 0.0283019
+# [2403]: 0.06 vs 0.03, error = 0.0283019
+# [2416]: 0.06 vs 0.03, error = 0.0283019
+# [2410]: 0.06 vs 0.03, error = 0.0283019
+# [2402]: 0.06 vs 0.03, error = 0.0283019)
+# Expected: true
+# format: TENSOR_NCHW
+# data_type: DATA_FLOAT
+# compute_mode: DATA_FLOAT
+# math_type: DEFAULT_MATH
+# algo: CONVOLUTION_BWD_DATA_ALGO_FFT_TILING
+convolution_test {
+  reference {
+    input {
+      dimension: [1, 32, 50, 50]
+      data_type: DATA_FLOAT
+      format: TENSOR_NCHW
+    }
+    filter {
+      dimension: [1, 32, 6, 6]
+      data_type: DATA_FLOAT
+      format: TENSOR_NCHW
+    }
+    output {
+      dimension: [1, 1, 25, 25]
+      data_type: DATA_FLOAT
+      format: TENSOR_NCHW
+    }
+    convolution {
+      pad: 2
+      pad: 2
+      filter_stride: 2
+      filter_stride: 2
+      compute_mode: DATA_FLOAT
+      math_type: DEFAULT_MATH
+      mode: CROSS_CORRELATION
+    }
+    bwd_data_algo: CONVOLUTION_BWD_DATA_ALGO_0
+    label: "CONVOLUTION_BWD_INPUT_1x32x50x50x6x6_Incorrect"
+  }
+  test {
+    all_algos: CONVOLUTION_BWD_DATA
+  }
+  values_lower_bound: 0.1
+  values_upper_bound: 0.1
 }

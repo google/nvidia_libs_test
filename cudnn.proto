@@ -126,6 +126,7 @@ message FilterDescriptor {
 // Describes a convolution. Passed to cudnnSetConvolutionNdDescriptor.
 message ConvolutionDescriptor {
   // Repeated fields below are expanded to same size using the default.
+  // The size is the number of spatial dimensions (i.e. 2 for 2D convolution).
   repeated int32 pad = 1;            // default = 0
   repeated int32 filter_stride = 2;  // default = 1
   repeated int32 dilation = 3;       // default = 1
@@ -142,7 +143,7 @@ message ConvolutionDescriptor {
     MathType math_type = 6;  // TENSOR_OP_MATH requires cuDNN 7.
   }
 
-  int32 group_count = 7;   // >1 requires cuDNN 7.
+  int32 group_count = 7;  // >1 requires cuDNN 7.
 }
 
 enum ConvolutionDirection {

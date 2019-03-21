@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <mutex>  // NOLINT
 #include <queue>
 #include <sstream>
 #include <vector>
@@ -64,8 +65,25 @@ Status DeviceDataEqual(const DeviceType* dev_first,
                        double tolerance) {
   using HostType = typename DeviceTypeTraits<DeviceType>::HostType;
 
+  // AllocateHostMemory, which ultimately calls cudaMallocHost, is extremely
+  // slow; it can take longer to run than everything else in this function.
+  // So we only call it once and wrap this function in a mutex.
+  //
+  // Note that this allocates one buffer per DeviceType; it would be marginally
+  // more efficient to use a global buffer.
+  static_assert(sizeof(HostType) % sizeof(DeviceType) == 0,
+                "Size of HostType must be an even multiple greater than size "
+                "of DeviceType (e.g. HostType == float, DeviceType == half)");
+  constexpr unsigned buffer_size_in_bytes = 1u << 27;  // 128MB
+  static std::mutex mu;
+  static void* host_buffer =
+      std::move(AllocateHostMemory(2 * buffer_size_in_bytes * sizeof(HostType) /
+                                   sizeof(DeviceType))
+                    .ValueOrDie())
+          .release();
+  std::unique_lock<std::mutex> lock(mu);
+
   unsigned num_diffs_to_report = 8;
-  unsigned buffer_size_in_bytes = 1u << 27;  // 128MB
   size_t num_buffer_elements =
       std::min(num_elements, buffer_size_in_bytes / sizeof(DeviceType));
 
@@ -73,11 +91,7 @@ Status DeviceDataEqual(const DeviceType* dev_first,
     return ErrorStatus("nullptr argument");
   }
 
-  ASSIGN_OR_RETURN_STATUS(
-      auto host_buffer,
-      AllocateHostMemory(2 * num_buffer_elements * sizeof(HostType)));
-
-  auto buf_first = static_cast<HostType*>(host_buffer.get());
+  auto buf_first = static_cast<HostType*>(host_buffer);
   auto buf_second = buf_first + num_buffer_elements;
 
   struct Diff {
@@ -97,8 +111,8 @@ Status DeviceDataEqual(const DeviceType* dev_first,
   size_t num_failures = 0;
   for (size_t i = 0; i < num_elements; i += num_buffer_elements) {
     size_t n = std::min(num_buffer_elements, num_elements - i);
-    RETURN_IF_ERROR_STATUS(CopyToHost(buf_first, dev_first, n));
-    RETURN_IF_ERROR_STATUS(CopyToHost(buf_second, dev_second, n));
+    RETURN_IF_ERROR_STATUS(CopyToHost(buf_first, dev_first + i, n));
+    RETURN_IF_ERROR_STATUS(CopyToHost(buf_second, dev_second + i, n));
     RETURN_IF_ERROR_STATUS(GetStatus(cudaDeviceSynchronize()));
 
     for (size_t j = 0; j < n; ++j) {

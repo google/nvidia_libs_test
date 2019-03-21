@@ -26,7 +26,7 @@
 
 
 DEFINE_string(proto_path, "cudnn_tests.textproto",
-              "Path to text proto file containing benchmarks to run.");
+              "Path to text proto file containing tests to run.");
 
 namespace nvidia_libs_test {
 namespace {
@@ -55,7 +55,7 @@ Status TensorDataEqual(const DeviceMemory& first, const DeviceMemory& second,
 
 proto::Tests GetCudnnTestsFromFile() {
   proto::Tests tests;
-  LoadTextProto(FLAGS_proto_path, &tests);
+  CHECK_OK_STATUS(LoadTextProto(FLAGS_proto_path, &tests));
   return tests;
 }
 
@@ -119,10 +119,14 @@ TEST(ConvolutionTest, GetWorkspaceSize_Overflow) {
 }
 
 // Tests the supported range of the arrayLengthRequested parameter for
-// cudnnGetConvolutionNdDescriptor, which should be [0, CUDNN_DIM_MAX-2]
-// according to the corrected documentation.
+// cudnnGetConvolutionNdDescriptor, which should be [0, CUDNN_DIM_MAX]
+// according to the documentation, but cuDNN reports CUDNN_STATUS_NOT_SUPPORTED
+// for anything larger than 6.
 //
 // See nvbugs/2064417.
+//
+// Update: The documentation has been corrected that the valid range is
+// [0, CUDNN_DIM_MAX-2].
 TEST(ConvolutionTest, GetConvolutionDesciptor_ArrayLengthRequested_Range) {
   proto::ConvolutionDescriptor proto;
   proto.set_compute_mode(proto::DATA_FLOAT);

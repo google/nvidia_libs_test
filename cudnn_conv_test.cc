@@ -292,8 +292,10 @@ TEST_P(ConvolutionTest, CompareResults) {
   ASSERT_OK_AND_ASSIGN(auto reference, CreateConvolution(ref_proto, data_lower,
                                                          data_upper, rand_gen));
 
-  ASSERT_NE(ref_proto.algo_oneof_case(), proto::ConvolutionConfig::kAllAlgos);
-  auto ref_algo = GetAlgorithms(ref_proto, handle, reference, 0).front();
+  ASSERT_OK_AND_ASSIGN(auto workspace_limit, GetWorkspaceLimit(ref_proto));
+  auto ref_algos = GetAlgorithms(ref_proto, handle, reference, workspace_limit);
+  ASSERT_FALSE(ref_algos.empty()) << "No algorithm found";
+  auto ref_algo = ref_algos.front();
 
   // Run reference convolution with default scaling factors.
   ASSERT_TRUE(IsOk(RunConvolution(1.0, 0.0, handle, reference, ref_algo)))
@@ -1198,41 +1200,42 @@ string GetTestName(const testing::TestParamInfo<proto::ConvolutionTest>& info) {
   return info.param.reference().label();
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     FromFile, ConvolutionTest,
     ::testing::ValuesIn(GetCudnnTestsFromFile().convolution_test()),
     GetTestName);
 
-INSTANTIATE_TEST_CASE_P(Conv2dFilter3x3, ConvolutionTest,
-                        ::testing::ValuesIn([] {
-                          std::vector<SizeRange> filter_sizes = {{3, 3}};
-                          return MakeTests2d(filter_sizes);
-                        }()),
-                        GetTestName);
+INSTANTIATE_TEST_SUITE_P(Conv2dFilter3x3, ConvolutionTest,
+                         ::testing::ValuesIn([] {
+                           std::vector<SizeRange> filter_sizes = {{3, 3}};
+                           return MakeTests2d(filter_sizes);
+                         }()),
+                         GetTestName);
 
-INSTANTIATE_TEST_CASE_P(Conv2dFilter5x5, ConvolutionTest,
-                        ::testing::ValuesIn([] {
-                          std::vector<SizeRange> filter_sizes = {{5, 5}};
-                          return MakeTests2d(filter_sizes);
-                        }()),
-                        GetTestName);
+INSTANTIATE_TEST_SUITE_P(Conv2dFilter5x5, ConvolutionTest,
+                         ::testing::ValuesIn([] {
+                           std::vector<SizeRange> filter_sizes = {{5, 5}};
+                           return MakeTests2d(filter_sizes);
+                         }()),
+                         GetTestName);
 
-INSTANTIATE_TEST_CASE_P(Conv2dFilterOther, ConvolutionTest,
-                        ::testing::ValuesIn([] {
-                          auto filter_sizes = GetFilterSizeRanges();
-                          return MakeTests2d(filter_sizes);
-                        }()),
-                        GetTestName);
+INSTANTIATE_TEST_SUITE_P(Conv2dFilterOther, ConvolutionTest,
+                         ::testing::ValuesIn([] {
+                           auto filter_sizes = GetFilterSizeRanges();
+                           return MakeTests2d(filter_sizes);
+                         }()),
+                         GetTestName);
 
-INSTANTIATE_TEST_CASE_P(Conv3d, ConvolutionTest,
-                        ::testing::ValuesIn([] { return MakeTests3d(); }()),
-                        GetTestName);
+INSTANTIATE_TEST_SUITE_P(Conv3d, ConvolutionTest,
+                         ::testing::ValuesIn([] { return MakeTests3d(); }()),
+                         GetTestName);
 
 #if CUDNN_MAJOR >= 7
-INSTANTIATE_TEST_CASE_P(Conv2dGrouped, ConvolutionTest, ::testing::ValuesIn([] {
-                          return MakeTestsGrouped();
-                        }()),
-                        GetTestName);
+INSTANTIATE_TEST_SUITE_P(Conv2dGrouped, ConvolutionTest,
+                         ::testing::ValuesIn([] {
+                           return MakeTestsGrouped();
+                         }()),
+                         GetTestName);
 #endif  // CUDNN_MAJOR >= 7
 
 }  // namespace
