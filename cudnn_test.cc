@@ -24,7 +24,6 @@
 #include "load_textproto.h"
 #include "test_util.h"
 
-
 DEFINE_string(proto_path, "cudnn_tests.textproto",
               "Path to text proto file containing tests to run.");
 
@@ -197,6 +196,7 @@ TEST(ConvolutionTest, GetGroupedConvolutionForwardOutputDim) {
 #endif
 
 }  // namespace nvidia_libs_test
+
 int main(int argc, char** argv) {
   // Parse and validate flags before initializing gtest.
   gflags::AllowCommandLineReparsing();

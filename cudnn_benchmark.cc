@@ -249,6 +249,7 @@ google::protobuf::RepeatedPtrField<proto::ConvolutionConfig> GetTensorFlowBenchm
       }
     }
   };
+
   add_benchmark(32, 5, 5, 1248, 128, 1, 1, 1, SAME, "conv0");
   add_benchmark(32, 8, 8, 384, 384, 1, 3, 1, SAME, "conv1");
   add_benchmark(32, 8, 8, 384, 384, 3, 1, 1, SAME, "conv2");

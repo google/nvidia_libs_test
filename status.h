@@ -31,6 +31,7 @@
 // that status from the current function or exit the program respectively.
 
 namespace nvidia_libs_test {
+
 using string = std::string;
 
 // Status object representing that an operation was successful, or otherwise

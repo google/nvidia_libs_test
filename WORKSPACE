@@ -11,9 +11,9 @@ http_archive(
 # ===== gtest =====
 new_http_archive(
     name = "com_google_googletest",
-    url = "https://github.com/google/googletest/archive/release-1.8.0.zip",
-    sha256 = "f3ed3b58511efd272eb074a3a6d6fb79d7c2e6a0e374323d1e6bcbcc1ef141bf",
-    strip_prefix = "googletest-release-1.8.0",
+    url = "https://github.com/google/googletest/archive/88f0493098c8d9fd0f096c2158a0e56deb952d53.zip",
+    sha256 = "9b0f8553f8da88ff0e77f0b456f12cec3cb52ddf3797508a00503c16e77745b8",
+    strip_prefix = "googletest-88f0493098c8d9fd0f096c2158a0e56deb952d53",
     build_file_content = """
 licenses(["notice"])
 

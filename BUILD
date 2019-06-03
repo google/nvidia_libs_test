@@ -1,5 +1,7 @@
 licenses(["notice"])  # Apache 2.0
 
+package(default_visibility = ["//visibility:private"])
+
 exports_files(["LICENSE"])
 
 cc_library(
@@ -61,6 +63,11 @@ cc_library(
 proto_library(
     name = "cudnn_proto",
     srcs = ["cudnn.proto"],
+)
+
+cc_proto_library(
+    name = "cudnn_cc_proto",
+    deps = [":cudnn_proto"],
 )
 
 cc_library(
@@ -140,9 +147,4 @@ genrule(
     outs = ["cuda_util.o"],
     cmd = "$(location @local_config_cuda//:nvcc) --compile $(SRCS) --output-file $(OUTS)",
     tools = ["@local_config_cuda//:nvcc"],
-)
-
-cc_proto_library(
-    name = "cudnn_cc_proto",
-    deps = [":cudnn_proto"],
 )

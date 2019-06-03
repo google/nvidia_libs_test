@@ -757,6 +757,8 @@ convolution_test {
 # compute_mode: DATA_FLOAT
 # math_type: DEFAULT_MATH
 # algo: CONVOLUTION_BWD_DATA_ALGO_FFT_TILING
+#
+# See nvbugs/2540779.
 convolution_test {
   reference {
     input {

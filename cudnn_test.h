@@ -46,6 +46,7 @@ proto::Tests GetCudnnTestsFromFile();
 enum class Padding { SAME, VALID };
 
 std::ostream& operator<<(std::ostream& ostr, Padding padding);
+
 namespace proto {
 // Make gtest print protos as text (instead of raw data).
 template <typename T>
