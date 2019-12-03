@@ -100,6 +100,7 @@ cc_binary(
     srcs = [
         "cudnn_benchmark.cc",
         "load_textproto.h",
+        "status.h",
     ],
     data = glob(["*.textproto"]),
     deps = [
@@ -108,6 +109,7 @@ cc_binary(
         ":cudnn_util",
         ":glog",
         ":kernel_timer",
+        "@com_google_absl//absl/types:optional",
         "@com_google_benchmark//:benchmark",
         "@com_google_protobuf//:protobuf_lite",
     ],
@@ -122,6 +124,7 @@ cc_test(
         "cudnn_test.cc",
         "cudnn_test.h",
         "load_textproto.h",
+        "status.h",
         "test_util.cc",
         "test_util.h",
     ],
@@ -138,6 +141,7 @@ cc_test(
         "@com_google_googletest//:gtest",
         "@com_google_protobuf//:protobuf_lite",
         "@local_config_cuda//:cuda_headers",
+        "@local_config_cuda//:cudnn",
     ],
 )
 

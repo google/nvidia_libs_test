@@ -1,3 +1,4 @@
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load ("//:cuda_configure.bzl", "cuda_configure")
 
 # ===== absl =====
@@ -9,7 +10,7 @@ http_archive(
 )
 
 # ===== gtest =====
-new_http_archive(
+http_archive(
     name = "com_google_googletest",
     url = "https://github.com/google/googletest/archive/88f0493098c8d9fd0f096c2158a0e56deb952d53.zip",
     sha256 = "9b0f8553f8da88ff0e77f0b456f12cec3cb52ddf3797508a00503c16e77745b8",
@@ -45,7 +46,7 @@ cc_library(
 )
 
 # ===== benchmark =====
-new_http_archive(
+http_archive(
     name = "com_google_benchmark",
     url = "https://github.com/google/benchmark/archive/v1.3.0.zip",
     sha256 = "51c2d2d35491aea83aa6121afc4a1fd9262fbd5ad679eb5e03c9fa481e42571e",
@@ -84,7 +85,7 @@ http_archive(
 )
 
 # ===== glog =====
-new_http_archive(
+http_archive(
     name = "com_google_glog",
     url = "https://github.com/google/glog/archive/v0.3.5.zip",
     sha256 = "267103f8a1e9578978aa1dc256001e6529ef593e5aea38193d31c2872ee025e8",

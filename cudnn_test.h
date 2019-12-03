@@ -25,7 +25,6 @@
 #include "gflags/gflags.h"
 #include "ostream_nullptr.h"
 #include "glog/logging.h"
-#include "google/protobuf/message.h"
 #include "gtest/gtest.h"
 #include "cuda_util.h"
 #include "cudnn_util.h"
