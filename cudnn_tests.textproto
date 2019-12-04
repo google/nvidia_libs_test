@@ -794,3 +794,64 @@ convolution_test {
   values_lower_bound: 0.1
   values_upper_bound: 0.1
 }
+
+# Bug reproduced on cuDNN 7.6.4 + Volta + CUDA 10.1.
+# Example output:
+# Value of: IsOk(TensorDataEqual(ref_result_data, *result_data, *result_desc, tolerance))
+#   Actual: false (112 elements differ more than 0.0001. Largest differences:
+# [40]: 1.00635 vs 1.21394, error = 0.0937623
+# [121]: 1.12444 vs 1.04241, error = 0.038613
+# [120]: 43.931 vs 43.4459, error = 0.0107964
+# [136]: 59.6611 vs 60.1196, error = 0.00750156
+# [168]: 37.767 vs 38.0539, error = 0.00734498
+# [146]: -2.7744 vs -2.79991, error = 0.00671352
+# [15]: 48.2762 vs 48.0094, error = 0.00541407
+# [7]: 33.1266 vs 32.9712, error = 0.00455383)
+#
+# Other algorithms (compared against IMPLICIT_GEMM) is correct.
+# TODO: add an nvbugs/ link.
+convolution_test {
+  reference {
+    input {
+      dimension: 1
+      dimension: 1
+      dimension: 16
+      dimension: 16
+      data_type: DATA_FLOAT
+      format: TENSOR_NCHW
+    }
+    filter {
+      dimension: 1
+      dimension: 1
+      dimension: 5
+      dimension: 5
+      data_type: DATA_FLOAT
+      format: TENSOR_NCHW
+    }
+    output {
+      dimension: 1
+      dimension: 1
+      dimension: 16
+      dimension: 16
+      data_type: DATA_FLOAT
+      format: TENSOR_NCHW
+    }
+    convolution {
+      filter_stride: 1
+      filter_stride: 1
+      pad: 2
+      pad: 2
+      compute_mode: DATA_FLOAT
+      math_type: TENSOR_OP_MATH
+      mode: CROSS_CORRELATION
+    }
+    fwd_algo: CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED
+    # Disabled to prevent crashing on normal runs.
+    label: "CONVOLUTION_FWD_16x16_5x5_WINOGRAD_NONFUSED_INPRECISE"
+  }
+  test {
+    fwd_algo: CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM
+  }
+  values_lower_bound: -15
+  values_upper_bound: 15
+}

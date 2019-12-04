@@ -60,7 +60,9 @@ cc_library(
     name = "curand_static",
     srcs = [
         "cuda/lib64/libcurand_static.a",
-        "cuda/lib64/libculibos.a",
+    ],
+    deps = [
+        ":culibos",
     ],
 )
 
@@ -81,13 +83,18 @@ cc_library(
     srcs = [
         "cudnn/lib64/libcudnn_static.a",
         "cuda/lib64/libcublas_static.a",
-        "cuda/lib64/libculibos.a",
-    ],
+    ] + glob(["cuda/lib64/libcublasLt_static.a"]),
     hdrs = ["cudnn/include/cudnn.h"],
     deps = [
         ":cuda",
-        ":cuda_headers"
+        ":cuda_headers",
+        ":culibos",
     ],
+)
+
+cc_library(
+    name = "culibos",
+    srcs = ["cuda/lib64/libculibos.a"],
 )
 
 cc_library(

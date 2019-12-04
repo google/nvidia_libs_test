@@ -181,10 +181,13 @@ genrule(
 # proto_library rules implicitly depend on @com_google_protobuf//:protoc
 http_archive(
     name = "com_google_protobuf",
-    url = "https://github.com/google/protobuf/archive/v3.5.1.zip",
-    sha256 = "1f8b9b202e9a4e467ff0b0f25facb1642727cdf5e69092038f15b37c75b99e45",
-    strip_prefix = "protobuf-3.5.1",
+    url = "https://github.com/google/protobuf/archive/v3.10.1.zip",
+    sha256 = "678d91d8a939a1ef9cb268e1f20c14cd55e40361dc397bb5881e4e1e532679b1",
+    strip_prefix = "protobuf-3.10.1",
 )
+
+load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
+protobuf_deps()
 
 # ===== cuda =====
 cuda_configure(name = "local_config_cuda")
