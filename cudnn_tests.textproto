@@ -809,7 +809,8 @@ convolution_test {
 # [7]: 33.1266 vs 32.9712, error = 0.00455383)
 #
 # Other algorithms (compared against IMPLICIT_GEMM) is correct.
-# TODO: add an nvbugs/ link.
+#
+# See nvbugs/2774617.
 convolution_test {
   reference {
     input {
