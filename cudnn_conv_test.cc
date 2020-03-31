@@ -1082,7 +1082,7 @@ google::protobuf::RepeatedPtrField<proto::ConvolutionTest> MakeTests2d(
   CudnnHandle handle = CreateCudnnHandle();
   auto validator = MakeCallWithTuple(ValidateParams2d);
 
-  std::mt19937 rand_gen(GetRandomSeed());
+  std::minstd_rand rand_gen(GetRandomSeed());
   auto params_vec =
       MakeAllPairs(rand_gen, validator, batch_counts, channel_counts,
                    image_sizes, image_sizes, channel_counts, filter_sizes,
@@ -1124,7 +1124,7 @@ google::protobuf::RepeatedPtrField<proto::ConvolutionTest> MakeTests3d() {
   CudnnHandle handle = CreateCudnnHandle();
   auto validator = MakeCallWithTuple(ValidateParams3d);
 
-  std::mt19937 rand_gen(GetRandomSeed());
+  std::minstd_rand rand_gen(GetRandomSeed());
   auto params_vec =
       MakeAllPairs(rand_gen, validator, batch_counts, channel_counts,
                    image_sizes, image_sizes, image_sizes, channel_counts,
@@ -1168,7 +1168,7 @@ google::protobuf::RepeatedPtrField<proto::ConvolutionTest> MakeTestsGrouped() {
   CudnnHandle handle = CreateCudnnHandle();
   auto validator = MakeCallWithTuple(ValidateParamsGrouped);
 
-  std::mt19937 rand_gen(GetRandomSeed());
+  std::minstd_rand rand_gen(GetRandomSeed());
   auto params_vec =
       MakeAllPairs(rand_gen, validator, batch_counts, channel_counts,
                    image_sizes, image_sizes, channel_counts, filter_sizes,

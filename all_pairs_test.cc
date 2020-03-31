@@ -45,7 +45,7 @@ TEST(AllPairsTest, GeneratesAllValidPairs) {
     return result;
   };
 
-  auto tuples = MakeAllPairs(std::mt19937{}, validator, make_vector(n0),
+  auto tuples = MakeAllPairs(std::minstd_rand{}, validator, make_vector(n0),
                              make_vector(n1), make_vector(n2));
 
   // {first value, second value, key of which parameters they refer to}.
