@@ -455,3 +455,29 @@ convolution_benchmark {
   }
   bwd_data_algo: CONVOLUTION_BWD_DATA_ALGO_1
 }
+
+convolution_benchmark {
+  label: "NCHW_BWD_FILTER_LARGE_PADDING_SLOW"
+  input {
+    dimension: [512, 3072, 3, 3],
+    data_type: DATA_FLOAT
+    format: TENSOR_NCHW
+  }
+  filter {
+    dimension: [1, 3072, 32, 32]
+    data_type: DATA_FLOAT
+    format: TENSOR_NCHW
+  }
+  output {
+    dimension: [512, 1, 30, 30]
+    data_type: DATA_FLOAT
+    format: TENSOR_NCHW
+  }
+  convolution {
+    pad: [29, 29]
+    compute_mode: DATA_FLOAT
+    math_type: TENSOR_OP_MATH
+    mode: CROSS_CORRELATION
+  }
+  bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING
+}

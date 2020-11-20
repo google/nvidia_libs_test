@@ -1,4 +1,6 @@
-licenses(["notice"])  # Apache 2.0
+load("//tools/build_defs/testing:bzl_library.bzl", "bzl_library")
+
+licenses(["notice"])
 
 package(default_visibility = ["//visibility:private"])
 
@@ -143,6 +145,13 @@ cc_test(
         "@local_config_cuda//:cuda_headers",
         "@local_config_cuda//:cudnn",
     ],
+)
+
+bzl_library(
+    name = "cuda_configure_bzl",
+    srcs = ["cuda_configure.bzl"],
+    parse_tests = False,
+    visibility = ["//visibility:private"],
 )
 
 genrule(

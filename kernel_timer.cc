@@ -191,7 +191,7 @@ class KernelCyclesTimer : public KernelTimer {
           cupti_event_group_, CUPTI_EVENT_READ_FLAG_NONE, cupti_event_id_,
           &domain_cycles_size, domain_cycles.data())));
       uint64_t total_cycles = std::accumulate(domain_cycles.begin(),
-                                              domain_cycles.end(), uint64_t{0});
+                                              domain_cycles.end(), uint64{0});
       CHECK(total_cycles > 0) << "CUPTI failed to report active cycles.";
       active_cycles_ += total_cycles;
       CHECK_OK_STATUS(GetStatus(cuptiEventGroupDisable(cupti_event_group_)));
