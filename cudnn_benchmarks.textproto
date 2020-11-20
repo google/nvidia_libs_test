@@ -61,7 +61,8 @@ convolution_benchmark {
   label: "NHWC_128x32x32x128x256"
   input {
     dimension: [128, 128, 32, 32]
-    data_type: DATA_HALF format: TENSOR_NHWC
+    data_type: DATA_HALF
+    format: TENSOR_NHWC
   }
   filter {
     dimension: [256, 128, 5, 1]
@@ -243,7 +244,7 @@ convolution_benchmark {
 convolution_benchmark {
   label: "NCHW_BWD_DATA_128_9_32_32_160_ALGO_0"
   input {
-    dimension: [128, 9, 32, 32],
+    dimension: [128, 9, 32, 32]
     data_type: DATA_HALF
     format: TENSOR_NCHW
   }
@@ -270,7 +271,7 @@ convolution_benchmark {
 convolution_benchmark {
   label: "NCHW_BWD_DATA_128_9_32_32_160_ALGO_1"
   input {
-    dimension: [128, 9, 32, 32],
+    dimension: [128, 9, 32, 32]
     data_type: DATA_HALF
     format: TENSOR_NCHW
   }
@@ -297,7 +298,7 @@ convolution_benchmark {
 convolution_benchmark {
   label: "NCHW_BWD_DATA_128_8_32_32_160_ALGO_1"
   input {
-    dimension: [128, 8, 32, 32],
+    dimension: [128, 8, 32, 32]
     data_type: DATA_HALF
     format: TENSOR_NCHW
   }
@@ -324,7 +325,7 @@ convolution_benchmark {
 convolution_benchmark {
   label: "NCHW_BWD_DATA_128_8_32_32_40_ALGO_0"
   input {
-    dimension: [128, 8, 32, 32],
+    dimension: [128, 8, 32, 32]
     data_type: DATA_HALF
     format: TENSOR_NCHW
   }
@@ -351,7 +352,7 @@ convolution_benchmark {
 convolution_benchmark {
   label: "NCHW_BWD_DATA_128_8_32_32_40_ALGO_1"
   input {
-    dimension: [128, 8, 32, 32],
+    dimension: [128, 8, 32, 32]
     data_type: DATA_HALF
     format: TENSOR_NCHW
   }
@@ -378,7 +379,7 @@ convolution_benchmark {
 convolution_benchmark {
   label: "NHWC_BWD_DATA_128_9_32_32_160_ALGO_1"
   input {
-    dimension: [128, 9, 32, 32],
+    dimension: [128, 9, 32, 32]
     data_type: DATA_HALF
     format: TENSOR_NHWC
   }
@@ -405,7 +406,7 @@ convolution_benchmark {
 convolution_benchmark {
   label: "NHWC_BWD_DATA_128_8_32_32_160_ALGO_1"
   input {
-    dimension: [128, 8, 32, 32],
+    dimension: [128, 8, 32, 32]
     data_type: DATA_HALF
     format: TENSOR_NHWC
   }
@@ -432,7 +433,7 @@ convolution_benchmark {
 convolution_benchmark {
   label: "NHWC_BWD_DATA_128_8_32_32_40_ALGO_1"
   input {
-    dimension: [128, 8, 32, 32],
+    dimension: [128, 8, 32, 32]
     data_type: DATA_HALF
     format: TENSOR_NHWC
   }
@@ -459,7 +460,7 @@ convolution_benchmark {
 convolution_benchmark {
   label: "NCHW_BWD_FILTER_LARGE_PADDING_SLOW"
   input {
-    dimension: [512, 3072, 3, 3],
+    dimension: [512, 3072, 3, 3]
     data_type: DATA_FLOAT
     format: TENSOR_NCHW
   }
@@ -479,5 +480,5 @@ convolution_benchmark {
     math_type: TENSOR_OP_MATH
     mode: CROSS_CORRELATION
   }
-  bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING
+  bwd_filter_algo: CONVOLUTION_BWD_FILTER_ALGO_0
 }
